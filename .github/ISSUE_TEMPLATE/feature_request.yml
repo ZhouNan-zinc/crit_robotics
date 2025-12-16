@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an idea or enhancement
+labels: [enhancement]
+title: "[Feature] <describe feature>"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for Crit Robotics? Let us know the problem you're solving and your proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user need or workflow is missing?
+      placeholder: "Operators cannot adjust exposure from the UI..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the change you would like to see. Include launch/config updates, UI sketches, etc.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: List any workarounds or related ideas.
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Dependencies, hardware requirements, blockers, links.

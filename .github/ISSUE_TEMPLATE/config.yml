@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / Discussion
+    url: https://github.com/serianrealm/crit_robotics/discussions
+    about: Ask questions or start discussions here

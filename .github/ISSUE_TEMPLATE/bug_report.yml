@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible problem so we can fix it together
+labels: [bug]
+title: "[Bug] <describe issue>"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Crit Robotics! Please fill in the details below so we can reproduce the problem quickly.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A clear and concise description of the issue.
+      placeholder: "The camera node crashes when..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide numbered steps or a launch command we can follow.
+      placeholder: "1. ros2 launch ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you thought should happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / logs
+      description: Paste relevant logs, stack traces, or screenshots.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: ROS distro, OS, hardware, branch/commit, etc.
+      placeholder: "ROS Humble on Ubuntu 22.04, Jetson Orin, commit abc123"
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Workarounds, ideas for fixes, or anything else.

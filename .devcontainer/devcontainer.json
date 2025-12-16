@@ -1,0 +1,45 @@
+{
+	"name": "Crit Robotics Development Environment",
+	"image": "osrf/ros:kilted-desktop",
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.cpptools",
+				"ms-python.python",
+				"ms-python.debugpy",
+				"ms-python.vscode-python-envs",
+				"ranch-hand-robotics.rde-pack",
+				"drblury.protobuf-vsc",
+				"openai.chatgpt" // lol
+			]
+		}
+	},
+
+	"postCreateCommand": "./scripts/setup.sh",
+
+	"mounts": [
+        "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
+        "source=/dev/dri,target=/dev/dri,type=bind,consistency=cached"
+	],
+
+    "containerEnv": {
+        "DISPLAY": "${localEnv:DISPLAY}", // Forward the host's X11 DISPLAY variable for GUI applications
+        "NVIDIA_DRIVER_CAPABILITIES": "all", // This is crutial for enabling GUI and other capabilities
+        "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST", // Limit ROS2 discovery to localhost for security
+        "ROS_DOMAIN_ID": "42", // Set a default ROS_DOMAIN_ID to avoid conflicts
+		"COLCON_LOG_PATH": "/dev/null",
+		"RCUTILS_COLORIZED_OUTPUT": "1"
+    },
+
+    "remoteUser": "root",
+	"privileged": true,
+	"runArgs": [
+        "--gpus", "all",
+        "--net=host",
+        "--pid=host",
+        "--ipc=host"
+    ] // For better performance, we use host networking and IPC at the expense of poor isolation
+
+
+}

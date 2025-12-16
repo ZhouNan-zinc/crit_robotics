@@ -1,0 +1,17 @@
+/camera_optical_frame:
+  camera:
+    ros__parameters:
+      url: ""
+      device: "usb:0"
+
+/hikcam:
+  camera:
+    ros__parameters:
+      url: "package://unicam/config/metadata/${NAME}.yaml"
+      pixel_width: 1024
+      pixel_height: 640
+      timeout: 3.
+      device: "usb:0"
+      exposure_time: 2000.
+      gain: 15.
+      gamma: 1.0

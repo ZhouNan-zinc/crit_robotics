@@ -1,0 +1,1 @@
+from .ov_end2end_yolo import OpenVinoEnd2endYolo

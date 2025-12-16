@@ -1,0 +1,8 @@
+udp_socket:
+  ros__parameters:
+    packet_size: 1024
+    ip_addr: "127.0.0.1"
+    local_port: 6000
+    remote_port: 6000
+    timeout: 1.0
+
