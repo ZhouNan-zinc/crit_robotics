@@ -1,6 +1,8 @@
 ﻿#include "unicam/node_interface.hpp"
 
 #include <opencv2/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+
 #include <camera_info_manager/camera_info_manager.hpp>
 #include <image_transport/image_transport.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -34,45 +36,18 @@ std::string deduce_encoding(const cv::Mat &image)
     throw std::runtime_error("Unsupported cv::Mat type");
 }
 
-int deduce_step(int width, const std::string &encoding)
-{
-    int channels = 0;
-    int bytes_per_channel = 0;
-
-    if (encoding == "mono8" || encoding == "mono16" || encoding == "32FC1") {
-        channels = 1;
-    } else if (encoding == "bgr8" || encoding == "rgb8" ||
-               encoding == "bgr16" || encoding == "rgb16" ||
-               encoding == "32FC3") {
-        channels = 3;
-    } else if (encoding == "bgra8" || encoding == "rgba8") {
-        channels = 4;
-    } else {
-        throw std::runtime_error("Unsupported encoding for step inference: " + encoding);
-    }
-
-    if (encoding.find("8") != std::string::npos) {
-        bytes_per_channel = 1;
-    } else if (encoding.find("16") != std::string::npos) {
-        bytes_per_channel = 2;
-    } else if (encoding.find("32F") != std::string::npos) {
-        bytes_per_channel = 4;
-    } else {
-        throw std::runtime_error("Unsupported bit depth in encoding: " + encoding);
-    }
-
-    return width * channels * bytes_per_channel;
-}
-
 cv::Mat shrink_resize_crop(const cv::Mat& image, const cv::Size& size)
 {
     /// NOTE: If got negative size, this can also work.
     double scale_ratio = std::min(
-        std::fabs(1.0 * image.rows / size.height),
-        std::fabs(1.0 * image.cols / size.width)
+        std::min(
+            std::fabs(1.0 * image.rows / size.height),
+            std::fabs(1.0 * image.cols / size.width)
+        ),
+        1.0
     );
 
-    cv::Mat resized;
+    cv::Mat resized = image;
     cv::resize(
         image,
         resized,
@@ -82,18 +57,28 @@ cv::Mat shrink_resize_crop(const cv::Mat& image, const cv::Size& size)
         ),
         0., 0., cv::INTER_AREA);
 
-    int crop_x = (resized.cols - size.width) / 2;
-    int crop_y = (resized.rows - size.height) / 2;
+    if ((resized.cols != size.width) xor (resized.rows != size.height)) {
+        int crop_x = size.width > 0 ? std::round((resized.cols-size.width)/2) : resized.cols;
+        int crop_y = size.height > 0 ? std::round((resized.rows-size.height)/2) : resized.rows;
+        
+        int roi_width = size.width > 0 ? size.width : resized.cols;
+        int roi_height = size.height > 0 ? size.height : resized.rows;
 
-    cv::Rect roi(crop_x, crop_y, size.width, size.height);
-    cv::Mat cropped = resized(roi);
+        cv::Rect roi(crop_x, crop_y, roi_width, roi_height);
+        cv::Mat cropped = resized(roi);
 
-    return cropped;
+        return cropped;
+    } else if ((resized.cols != size.width) && (resized.rows != size.height)) {
+        return resized;
+    }
+
+    // auto only
+    return resized;
 }
 
 
 const char* CameraNodeInterface::node_name = "camera";
-const char* CameraNodeInterface::ns = "camera";
+const char* CameraNodeInterface::ns = "hikcam";
 rclcpp::NodeOptions CameraNodeInterface::options = rclcpp::NodeOptions()
     .use_intra_process_comms(true)
     .automatically_declare_parameters_from_overrides(true);
@@ -103,21 +88,19 @@ CameraNodeInterface::CameraNodeInterface()
 {
     camera_pub = std::make_shared<image_transport::CameraPublisher>(
         image_transport::create_camera_publisher(
-            this, "image_raw", rmw_qos_profile_sensor_data));
+            this, "image_raw"));
 
     auto camera_name = std::string(get_namespace()).substr(1);
     auto url = get_parameter_or<std::string>("url", ""); 
-    // auto url = "/workspaces/RoboDevel/robo_devel/unicam/calibration/hikcam.yaml";
-    /// FIXME: pass url to camera info manager
     cinfo_manager = std::make_shared<camera_info_manager::CameraInfoManager>(this, camera_name, url);
 
-    if (cinfo_manager->validateURL(url)) {
+    if (!cinfo_manager->validateURL(url)) {
         if (url == "") {
-            RCLCPP_ERROR_STREAM(logger, "Unconfigured cinfo url, please configure it.");
+            RCLCPP_WARN_STREAM(logger, "Unconfigured cinfo url. You should provide a valid url unless you are calibrating the camera.");
         } else {
             RCLCPP_ERROR_STREAM(logger, "Invalid cinfo url:" << url);
         }
-        RCLCPP_ERROR_STREAM(logger, "Setting up camera `" << camera_name << "` with empty cinfo");
+        cinfo_manager = std::make_shared<camera_info_manager::CameraInfoManager>(this, camera_name, "");
     } else {
         if (not cinfo_manager->isCalibrated()) {
             RCLCPP_WARN_STREAM(logger, "Got uncalibrated camera `" << camera_name << "`, please check your yaml file.");
@@ -133,59 +116,40 @@ CameraNodeInterface::CameraNodeInterface()
     auto daemon = [this]() -> void {
         if (this->is_alive()) {
             return;
+        } else {
+            try {
+                this->run();
+            } catch (std::exception &ex) {
+                RCLCPP_ERROR_STREAM(logger, "Error while opening camera: " << ex.what() << ", Retrying...");
+            }
         }
-        try {
-            this->run();
-        } catch (std::exception &ex) {
-            RCLCPP_ERROR_STREAM(logger, "Error while opening camera: " << ex.what() << ", Retrying...");
-            return;
-        }
-        RCLCPP_INFO_STREAM(logger, "Open device.");
     };
     timer = create_timer(timeout, daemon);
 }
-
 void CameraNodeInterface::publish(const cv::Mat& image)
 {
     auto pixel_width = get_parameter_or<int>("pixel_width", -1);
     auto pixel_height = get_parameter_or<int>("pixel_height", -1);
-    auto roi = shrink_resize_crop(image, cv::Size(pixel_width, pixel_height));
 
-    auto cinfo = std::make_unique<camera_info_manager::CameraInfo>(cinfo_manager->getCameraInfo());
-    auto cimage = std::make_unique<sensor_msgs::msg::Image>();
+    auto roi = shrink_resize_crop(image, cv::Size(pixel_width, pixel_height));  // FIXME: deduce pixel width and height
 
-    cimage->header = cinfo->header;
-    cimage->height = roi.rows;
-    cimage->width = roi.cols;
-    cimage->encoding = deduce_encoding(roi);
-    cimage->step = roi.step;
-    cimage->is_bigendian = false;
-    cimage->data.assign(roi.data, roi.data + roi.total() * roi.elemSize());
+    auto cinfo = cinfo_manager->getCameraInfo();
+    auto cimage = sensor_msgs::msg::Image()
+        .set__header(cinfo.header)
+        .set__height(roi.rows)
+        .set__width(roi.cols)
+        .set__encoding(deduce_encoding(roi))
+        .set__step(roi.step)
+        .set__is_bigendian(false);
 
-    camera_pub->publish(std::move(cimage), std::move(cinfo), now());
-}
+    /// NOTE: using copy assignment can decline copy time from 2ms to 0.5ms
+    cimage.data = std::vector<unsigned char>(image.datastart, image.dataend);
 
-void CameraNodeInterface::publish(int height, int width, const std::string& encoding, const std::vector<unsigned char>& data)
-{
-    auto cinfo = std::make_unique<camera_info_manager::CameraInfo>(cinfo_manager->getCameraInfo());
-    auto cimage = std::make_unique<sensor_msgs::msg::Image>();
-
-    auto pixel_width = get_parameter_or<int>("pixel_width", -1);
-    auto pixel_height = get_parameter_or<int>("pixel_height", -1);
-    if (height != pixel_height and width != pixel_width) {
-        RCLCPP_ERROR(logger, "Current we do not support resize here.");
-        /// TODO: Implement resize with cv::Mat
-    }
-
-    cimage->header = cinfo->header;
-    cimage->height = height;
-    cimage->width = width;
-    cimage->encoding = encoding;
-    cimage->step = deduce_step(width, encoding);
-    cimage->is_bigendian = false;
-    cimage->data = data;
-
-    camera_pub->publish(std::move(cimage), std::move(cinfo), now());
+    camera_pub->publish(
+        std::make_unique<sensor_msgs::msg::Image>(cimage),
+        std::make_unique<sensor_msgs::msg::CameraInfo>(cinfo),
+        now()
+    );
 }
 
 rcl_interfaces::msg::SetParametersResult CameraNodeInterface::dynamic_reconfigure([[maybe_unused]] const std::vector<rclcpp::Parameter> &parameters)

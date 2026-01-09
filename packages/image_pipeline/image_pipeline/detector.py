@@ -2,12 +2,12 @@
 
 import rclpy
 
-from .pipe import OpenVinoEnd2endYolo
+from .pipe import End2endYolo
 
 def main():
     rclpy.init()
 
-    node = OpenVinoEnd2endYolo()
+    node = End2endYolo()
 
     rclpy.spin(node)
     

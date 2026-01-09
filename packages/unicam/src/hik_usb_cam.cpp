@@ -1,6 +1,7 @@
 ﻿#include "unicam/hik_usb_cam.hpp"
 
 #include <stdexcept>
+#include <opencv2/highgui.hpp>
 
 HikVisionUsbCam::HikVisionUsbCam()
     : CameraNodeInterface(), device_id(0), handle(nullptr)
@@ -50,22 +51,27 @@ void HikVisionUsbCam::run() {
         MV_CC_CloseDevice(handle);
     }
 
-    MV_CC_SetExposureAutoMode(handle, MV_EXPOSURE_AUTO_MODE_OFF);
-    MV_CC_SetGainMode(handle, MV_GAIN_MODE_OFF);
-    MV_CC_SetPixelFormat(handle, PixelType_Gvsp_BGR8_Packed);
-    MV_CC_SetTriggerMode(handle, MV_TRIGGER_MODE_OFF);
+    /// NOTE: the 'nValue' is from the list : 0 2 
+    MV_CC_SetEnumValue(handle, "ADCBitDepth", 2);
     MV_CC_SetAcquisitionMode(handle, MV_ACQ_MODE_CONTINUOUS);
-    MV_CC_SetBalanceWhiteAuto(handle, MV_BALANCEWHITE_AUTO_ONCE);
+    MV_CC_SetFrameRate(handle, 65535.);
+    MV_CC_SetBoolValue(handle, "AcquisitionFrameRateEnable", false);
+    MV_CC_SetExposureAutoMode(handle, MV_EXPOSURE_AUTO_MODE_OFF);
+    MV_CC_SetGainMode(handle, MV_GAIN_MODE_CONTINUOUS);
+    MV_CC_SetGammaSelector(handle, MV_GAMMA_SELECTOR_USER);
+    MV_CC_SetBoolValue(handle, "GammaEnable", true);
 
+    auto gamma = get_parameter_or<double>("gamma", 0.80);
+    MV_CC_SetGamma(handle, gamma);
     auto exposure_time = get_parameter_or<double>("exposure_time", 2500.);
     MV_CC_SetExposureTime(handle, exposure_time);
-    auto gain = get_parameter_or<double>("gain", 15.);
-    MV_CC_SetGain(handle, gain);
-    auto gamma = get_parameter_or<double>("gamma", 1.0);
-    MV_CC_SetGamma(handle, gamma);
 
     MV_CC_OpenDevice(handle, MV_ACCESS_Control);
     MV_CC_StartGrabbing(handle);
+
+    MVCC_FLOATVALUE frame_rate;
+    MV_CC_GetFrameRate(handle, &frame_rate);
+    RCLCPP_INFO_STREAM(logger, "Aquisition frame rate: " << frame_rate.fCurValue);
 }
 
 HikVisionUsbCam::~HikVisionUsbCam()
@@ -82,6 +88,8 @@ HikVisionUsbCam::~HikVisionUsbCam()
 
 rcl_interfaces::msg::SetParametersResult HikVisionUsbCam::dynamic_reconfigure([[maybe_unused]] const std::vector<rclcpp::Parameter> &parameters)
 {
+    RCLCPP_ERROR(logger, "No Dynamic Reconf");
+    
     auto result = rcl_interfaces::msg::SetParametersResult().set__successful(true);
 
     if (handle == nullptr) {
@@ -93,9 +101,6 @@ rcl_interfaces::msg::SetParametersResult HikVisionUsbCam::dynamic_reconfigure([[
         if (param.get_name() == "exposure_time") {
             auto exposure_time = param.as_double();
             MV_CC_SetExposureTime(handle, exposure_time);
-        } else if (param.get_name() == "gain") {
-            auto gain = param.as_double();
-            MV_CC_SetGain(handle, gain);
         } else if (param.get_name() == "gamma") {
             auto gamma = param.as_double();
             MV_CC_SetGamma(handle, gamma);
@@ -111,6 +116,23 @@ rcl_interfaces::msg::SetParametersResult HikVisionUsbCam::dynamic_reconfigure([[
 void HikVisionUsbCam::image_callback(unsigned char *pData, MV_FRAME_OUT_INFO_EX *pFrameInfo, void *pUser)
 {
     auto self = static_cast<HikVisionUsbCam *>(pUser);
-    auto image = cv::Mat(pFrameInfo->nHeight, pFrameInfo->nWidth, CV_8UC3, static_cast<void *>(pData));
+    auto image = cv::Mat(cv::Size(pFrameInfo->nWidth, pFrameInfo->nHeight), CV_8UC3);
+    
+    MV_CC_PIXEL_CONVERT_PARAM_EX pixel_convert_param{
+        .nWidth=pFrameInfo->nWidth,
+        .nHeight=pFrameInfo->nHeight,
+        .enSrcPixelType=pFrameInfo->enPixelType,
+        .pSrcData=pData,
+        .nSrcDataLen=pFrameInfo->nFrameLen,
+        .enDstPixelType=PixelType_Gvsp_BGR8_Packed,
+        .pDstBuffer=image.data,
+        .nDstLen=(unsigned int)(image.total()*image.elemSize()),
+        .nDstBufferSize=(unsigned int)(image.total()*image.elemSize()),
+        .nRes={}
+    };
+
+    MV_CC_ConvertPixelTypeEx(self->handle, &pixel_convert_param);
+
     self->publish(image);
+
 }

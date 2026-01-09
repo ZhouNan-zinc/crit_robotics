@@ -13,8 +13,11 @@ def generate_launch_description() -> LaunchDescription:
     ])
 
     return LaunchDescription([
-        DeclareLaunchArgument("camera", default_value="camera_optical_frame"),
-
+        DeclareLaunchArgument(
+            "camera", 
+            default_value="hikcam",
+            description="The camera namespace or frame used for the camera topics."
+        ),
         Node(
             package="unicam",
             executable="unicam",

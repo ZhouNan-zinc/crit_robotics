@@ -1,44 +1,50 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument, TimerAction
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, StringJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description() -> LaunchDescription:
-    namespace = LaunchConfiguration("camera")
+    camera = LaunchConfiguration("camera")
+    image = PathJoinSubstitution([camera, "image_raw"])
     size = LaunchConfiguration('size')
     square = LaunchConfiguration("square")
+
     config = PathJoinSubstitution([
         FindPackageShare("unicam"),
         "config",
         LaunchConfiguration("config", default="default.yaml")
     ])
     
-    remappings = [
-        ("/image", PathJoinSubstitution([namespace, "image_raw"])),
-        ("/camera", PathJoinSubstitution([namespace, "camera_info"])),
-    ]
-
     return LaunchDescription([
-        DeclareLaunchArgument("camera", default_value="camera_optical_frame"),
-        DeclareLaunchArgument("size"),
-        DeclareLaunchArgument("square"),
+        DeclareLaunchArgument(
+            "camera", 
+            default_value="hikcam",
+            description="The camera namespace or frame used for the camera topics."
+        ),
+        DeclareLaunchArgument(
+            "size",
+            description="The number of internal corners per checkerboard row and column (e.g., 8x11 for 8 rows and 11 columns)."
+        ),
+        DeclareLaunchArgument(
+            "square",
+            description="The square length of the checkerboard square in meters, e.g., 0.025 for a 2.5 cm square."
+        ),
 
         Node(
             package="unicam",
             executable="unicam",
             name="camera",
-            namespace=namespace,
+            namespace=camera,
             parameters=[config]
         ),
 
         Node(
-            package="camera_calibration",
-            executable="cameracalibrator",
-            name="calibrator",
+            package='camera_calibration',
+            executable='cameracalibrator',
             output='both',
             emulate_tty=True,
-            arguments=['--size', size,'--square', square],
-            remappings=remappings
+            arguments=['--size', size,'--square', square, '--no-service-check'],
+            remappings=[('camera',StringJoinSubstitution(['/', camera])), ('image',StringJoinSubstitution(['/', image]))]
         )
     ])

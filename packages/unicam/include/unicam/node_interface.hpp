@@ -37,15 +37,6 @@ std::string deduce_encoding(const cv::Mat &image);
  * @return Step/stride measured in bytes.
  * @throws std::runtime_error if the encoding or bit depth is unknown.
  */
-int deduce_step(int width, const std::string &encoding);
-
-/**
- * @brief Resize an image keeping aspect ratio and crop the center region.
- *
- * @param image Source image.
- * @param size Desired target size.
- * @return A resized and center-cropped copy.
- */
 cv::Mat shrink_resize_crop(const cv::Mat& image, const cv::Size& size);
 
 /**
@@ -64,11 +55,6 @@ public:
     virtual void publish(const cv::Mat& image);
 
     /**
-     * @brief Publish a pre-formatted buffer using explicit metadata.
-     */
-    virtual void publish(int height, int width, const std::string& encoding, const std::vector<unsigned char>& data);
-
-    /**
      * @brief Default implementation logs unsupported parameter updates.
      */
     virtual rcl_interfaces::msg::SetParametersResult dynamic_reconfigure([[maybe_unused]] const std::vector<rclcpp::Parameter> &parameters);
@@ -77,6 +63,7 @@ protected:
     static const char* node_name;
     static const char* ns;
     static rclcpp::NodeOptions options;
+
     rclcpp::Logger logger;
 
     /**

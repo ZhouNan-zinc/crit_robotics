@@ -1,20 +1,8 @@
-"""Pose-aware image pipeline node that subscribes to camera topics."""
 
-import numpy as np
-from image_transport_py import ImageTransport
-from cv_bridge import CvBridge
-from rclpy.qos import QoSProfile
+from .node_interface import TrackerNodeInterface
+from ..ops import pose_estimate
+from ..ops import ByteTrack
 
-from sensor_msgs.msg import (
-    Image,
-    CameraInfo
-)
-from geometry_msgs.msg import (
-    Point,
-    Quaternion,
-    Pose,
-    PoseWithCovariance
-)
 from vision_msgs.msg import (
     Pose2D,
     BoundingBox2D,
@@ -24,54 +12,55 @@ from vision_msgs.msg import (
     Detection2DArray
 )
 
-from .node_interface import ImagePipelineNodeInterface
-from ..ops import pose_estimate
+from rclpy.time import Time
 
-class PosePipelineNodeInterface(ImagePipelineNodeInterface):
-    """Node base class that converts detector output into Detection2DArray."""
+import numpy as np
 
+
+class SequentialTracker(TrackerNodeInterface):
     def __init__(self):
         super().__init__()
 
-        self.br = CvBridge()
-        
-        self.detection_array_pub = self.create_publisher(
-            Detection2DArray,
-            "detection_array",
-            QoSProfile(10)
+        self.mot_tracker = ByteTrack(
+            max_age=30,
+            min_hits=3,
+            iou_threshold=0.3,
+            track_thresh=0.5,
+            det_thresh=0.1
         )
 
-        subscribe_to = self.get_parameter_or("subscribe_to", ["hikcam"]).value
-        it = ImageTransport(
-            node_name=self.node_name,
-            image_transport="raw"
-        )
-        self.image_subs = [
-            it.subscribe_camera(
-                base_topic=f"{namespace}/image_raw",
-                queue_size=1,
-                callback=self.callback
-            )
-            for namespace in subscribe_to
-        ]
+        self.stamp_thres = Time()
 
-    def callback(self, cimage:Image, cinfo:CameraInfo):
-        """Convert incoming image/camera info into detection messages."""
-        image = self.br.imgmsg_to_cv2(cimage, desired_encoding="bgr8")
+    def callback(self, msg: Detection2DArray):
+        stamp = Time(seconds=msg.header.stamp.sec, nanoseconds=msg.header.stamp.nanosec)
+        if stamp < self.stamp_thres:
+            self.logger.warn("Message not in order, check your image pipeline. Dropping message.")
+            return
+        else:
+            self.stamp_thres = stamp
         
-        outputs_info, track_ids = self.pipe(image)
+        dets = []
+        for det in msg.detections:
+            cx = det.bbox.center.position.x
+            cy = det.bbox.center.position.y
+            w = det.bbox.size_x
+            h = det.bbox.size_y
 
-        header = cinfo.header
-        camera_matrix = np.array(cinfo.k, dtype=np.float64).reshape(3, 3)
-        distortion_coefficients = np.array(cinfo.d, dtype=np.float64)
-        projection_matrix = np.array(cinfo.p, dtype=np.float64).reshape(3, 4)
-        W, H = cinfo.width, cinfo.height
+            best = max(det.results, key=lambda res: res.score)
+            score = float(best.score)
+            class_id = int(best.hypothesis.class_id)
 
-        detection_array = Detection2DArray(
-            header=header,
-            detections=[]
-        )
-        
+            x1 = cx - w / 2.0
+            y1 = cy - h / 2.0
+            x2 = cx + w / 2.0
+            y2 = cy + h / 2.0
+
+            dets.append([x1, y1, x2, y2, score, class_id])
+
+        dets = np.asarray(dets, dtype=np.float32) if len(dets) else np.empty((0, 6), dtype=np.float32)
+
+        track_ids, outputs_info = self.mot_tracker.update(dets)
+
         for track_id, info in zip(track_ids, outputs_info):
             bbox = np.array(info[:4]) * np.array([W, H, W, H])
             keypoints  = np.array(info[6:6+8]).reshape(-1, 2) * np.array([W, H])
@@ -121,3 +110,9 @@ class PosePipelineNodeInterface(ImagePipelineNodeInterface):
             )
 
         self.detection_array_pub.publish(detection_array)
+
+
+
+
+
+            
