@@ -2,12 +2,12 @@
 
 import rclpy
 
-from .node_interface import End2endYolo
+from .node_interface import YoloPoseDetector
 
 def main():
     rclpy.init()
 
-    node = End2endYolo()
+    node = YoloPoseDetector()
 
     rclpy.spin(node)
     

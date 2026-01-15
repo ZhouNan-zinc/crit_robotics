@@ -4,7 +4,7 @@ Crit Robotics is organized as a ROS 2 workspace with a set of focused packages. 
 
 ```
 ┌────────────┐    sensor_msgs/Image     ┌─────────────────────────┐
-│  unicam    │ ───────────────────────▶ │   image_pipeline node   │
+│  unicam    │ ───────────────────────▶ │   imagepipe node   │
 │  (C++)     │    camera_info + params  │ • OpenVINO YOLO         │
 │            │                          │ • ByteTrack             │
 └────────────┘                          │ • Pose estimator        │
@@ -35,11 +35,11 @@ Crit Robotics is organized as a ROS 2 workspace with a set of focused packages. 
   - `src/hik_usb_cam.cpp` – Hikvision-specific implementation.
   - `config/default.yaml` – parameter presets per namespace.
 
-### image_pipeline
+### imagepipe
 
 - Python ROS 2 node that consumes images and camera info topics.
-- `image_pipeline/pipe/ov_end2end_yolo.py` loads OpenVINO compiled models, performs inference, applies `end2end_fastnms`, and feeds detections into a ByteTrack multi-object tracker.
-- `image_pipeline/node/pose_estimate.py` converts tracker output into `vision_msgs/Detection2DArray` messages, estimating 6-DoF pose via `cv2.solvePnP`.
+- `imagepipe/pipe/ov_end2end_yolo.py` loads OpenVINO compiled models, performs inference, applies `end2end_fastnms`, and feeds detections into a ByteTrack multi-object tracker.
+- `imagepipe/node/pose_estimate.py` converts tracker output into `vision_msgs/Detection2DArray` messages, estimating 6-DoF pose via `cv2.solvePnP`.
 - Depends on GPU/CPU OpenVINO runtime (configurable via ROS parameters), `lap` (assignment), and `numba`.
 - Designed to be extended with additional pipelines that inherit from `PosePipelineNodeInterface`.
 
@@ -57,7 +57,7 @@ Crit Robotics is organized as a ROS 2 workspace with a set of focused packages. 
 ## Data Flow
 
 1. `unicam` publishes `/<camera_ns>/image_raw` and calibrated `CameraInfo` using the namespaces defined in `config/default.yaml`.
-2. `image_pipeline` subscribes to one or more namespaces (parameter `subscribe_to`), performs detection + tracking, and publishes `detection_array` messages.
+2. `imagepipe` subscribes to one or more namespaces (parameter `subscribe_to`), performs detection + tracking, and publishes `detection_array` messages.
 3. Consumers (gimbal control, UI overlays, telemetry exporters) use the detection array, optionally bridging it over the network via `udp_socket`.
 4. Commands to actuators are expressed using `control_msgs/Command` for consistency.
 

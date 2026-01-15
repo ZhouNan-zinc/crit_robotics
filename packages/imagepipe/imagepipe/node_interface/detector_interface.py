@@ -47,7 +47,7 @@ CLASS_TO_POINTS = {
 
 class DetectorNodeInterface(Node, ABC):
     """Base node that declares parameters up-front and exposes helpers."""
-    node_name = "image_pipeline"
+    node_name = "imagepipe"
 
     def __init__(self):
         super().__init__(
@@ -94,8 +94,8 @@ class YoloPoseDetector(DetectorNodeInterface):
         )
         
         model_name_or_path = self.get_parameter_or("model_name_or_path", "namespace/model")
-        if os.path.exists(os.path.join(get_package_share_directory("image_pipeline"), model_name_or_path)):
-            model_name_or_path = os.path.join(get_package_share_directory("image_pipeline"), model_name_or_path)
+        if os.path.exists(os.path.join(get_package_share_directory("imagepipe"), model_name_or_path)):
+            model_name_or_path = os.path.join(get_package_share_directory("imagepipe"), model_name_or_path)
 
         self.model = Yolov10PoseModel.from_pretrained(
             model_name_or_path

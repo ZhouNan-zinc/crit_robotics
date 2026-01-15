@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 from glob import glob
 
-package_name = 'image_pipeline'
+package_name = 'imagepipe'
 
 setup(
     name=package_name,
@@ -25,8 +25,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'detector = image_pipeline.detector:main',
-            'tracker = image_pipeline.tracker:main'
+            'detector = imagepipe.detector:main',
+            'tracker = imagepipe.tracker:main'
         ],
     },
 )

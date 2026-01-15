@@ -5,7 +5,7 @@ Crit Robotics is a ROS 2 workspace that bundles the camera drivers, perception n
 ## Highlights
 
 - **Camera bring-up** &mdash; `unicam` wraps Hikrobot USB cameras, publishes `image_raw` and calibrated `sensor_msgs/CameraInfo`, and exposes runtime tuning parameters.
-- **Perception pipeline** &mdash; `image_pipeline` performs OpenVINO end-to-end YOLO inference, ByteTrack multi-object tracking, and pose estimation that feeds `vision_msgs/Detection2DArray`.
+- **Perception pipeline** &mdash; `imagepipe` performs OpenVINO end-to-end YOLO inference, ByteTrack multi-object tracking, and pose estimation that feeds `vision_msgs/Detection2DArray`.
 - **Networking bridge** &mdash; `udp_socket` provides UDP broadcast helpers plus protobuf scaffolding so detections/commands can hop networks.
 - **Custom interfaces** &mdash; `control_msgs` defines the minimal command schema used by downstream gimbal or turret controllers.
 
@@ -26,7 +26,7 @@ source install/setup.bash
 
 # Example launch files
 ros2 launch unicam launch.py camera=hikcam
-ros2 run image_pipeline image_pipeline     # consumes the /hikcam/image_raw topic
+ros2 run imagepipe imagepipe     # consumes the /hikcam/image_raw topic
 ros2 run udp_socket udp_socket --ros-args --params-file packages/udp_socket/config/default.yaml
 ```
 
@@ -38,7 +38,7 @@ See `docs/getting-started.md` for the full walkthrough, including GPU requiremen
 | --- | --- |
 | `crit_robotics/` | Aggregate meta-package, launchers, and URDF placeholders. |
 | `packages/unicam/` | Hikrobot USB camera driver (C++). Includes calibration YAML and launch/config helpers. |
-| `packages/image_pipeline/` | Python perception stack: OpenVINO backend, YOLO detection, ByteTrack tracking, pose estimation. |
+| `packages/imagepipe/` | Python perception stack: OpenVINO backend, YOLO detection, ByteTrack tracking, pose estimation. |
 | `packages/udp_socket/` | UDP networking node plus protobuf schema for telemetry bridging. |
 | `packages/control_msgs/` | Custom ROS 2 interfaces (messages, future services). |
 | `scripts/` | Environment bootstrap (`setup.bash`) and utility tools (ballistic table generator). |
@@ -57,7 +57,7 @@ See `docs/getting-started.md` for the full walkthrough, including GPU requiremen
 ## Launch Recipes
 
 - `ros2 launch unicam launch.py camera:=hikcam` &mdash; start the Hikrobot camera and publish `/hikcam/image_raw`.
-- `ros2 run image_pipeline image_pipeline` &mdash; run inference on whichever namespaces are listed in the `subscribe_to` parameter (defaults to `hikcam`).
+- `ros2 run imagepipe imagepipe` &mdash; run inference on whichever namespaces are listed in the `subscribe_to` parameter (defaults to `hikcam`).
 - `ros2 run udp_socket udp_socket` &mdash; bring up the UDP bridge and echo packets across the network.
 - `ros2 launch crit_robotics bringup.launch.py` &mdash; placeholder for combined bring-up (currently empty; extend as the system grows).
 

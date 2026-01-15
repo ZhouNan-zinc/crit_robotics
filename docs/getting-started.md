@@ -67,7 +67,7 @@ Parameters such as `pixel_width`, `exposure_time`, and `gain` live in `packages/
 ### Perception Pipeline
 
 ```bash
-ros2 run image_pipeline image_pipeline --ros-args -p model_name_or_path:=/path/to/ov_model
+ros2 run imagepipe imagepipe --ros-args -p model_name_or_path:=/path/to/ov_model
 ```
 
 Optional parameters:
@@ -89,7 +89,7 @@ Publish to `test_send` or listen on `test_recv` to verify connectivity.
 
 ```bash
 colcon test
-colcon test --packages-select image_pipeline  # Python-only package
+colcon test --packages-select imagepipe  # Python-only package
 ```
 
 Add unit or integration tests whenever you introduce new behavior. The C++ packages enable `-Wall -Wextra -Wpedantic`; fix warnings introduced by your changes.

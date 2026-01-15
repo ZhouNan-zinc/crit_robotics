@@ -60,7 +60,7 @@ def set_logging_backend(backend: str|ModuleType) -> None:
             raise ImportError("rclpy is not available.")
         
         # NOTE: For rclpy, name is specified as node name.
-        getLogger = rclpy.logging.get_logger("image_pipeline")
+        getLogger = rclpy.logging.get_logger("imagepipe")
 
     else:
         raise TypeError(f"Unsupported logging backend: {backend!r}")

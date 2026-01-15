@@ -1,4 +1,4 @@
-from image_pipeline.runtime.models import Yolov10PoseModel
+from imagepipe.runtime.models import Yolov10PoseModel
 
 import torch
 from PIL import Image

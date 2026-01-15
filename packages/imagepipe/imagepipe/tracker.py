@@ -2,12 +2,12 @@
 
 import rclpy
 
-from .node_interface import SequentialTracker
+from .node_interface import MotTracker
 
 def main():
     rclpy.init()
 
-    node = SequentialTracker()
+    node = MotTracker()
 
     rclpy.spin(node)
     

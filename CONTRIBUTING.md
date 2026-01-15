@@ -22,7 +22,7 @@ Thanks for your interest in building Crit Robotics! This document outlines how t
    - Re-source `install/setup.bash` (or use an overlay workspace) after building.
 4. **Test & lint**
    - C++: `colcon test` runs package-specific tests and `ament_lint_auto` checks.
-   - Python: `pytest` under `packages/image_pipeline`, plus `ament_flake8` / `ament_pep257` when invoked via `colcon test`.
+   - Python: `pytest` under `packages/imagepipe`, plus `ament_flake8` / `ament_pep257` when invoked via `colcon test`.
    - Commit only when `colcon test` passes locally.
 5. **Commit & pull request**
    - Follow conventional commit messages if possible (e.g., `feat: add yaw control topic`).

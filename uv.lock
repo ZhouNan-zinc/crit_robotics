@@ -563,6 +563,7 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "openvino" },
     { name = "safetensors" },
+    { name = "setuptools" },
     { name = "torch" },
     { name = "torchvision" },
 ]
@@ -577,6 +578,7 @@ requires-dist = [
     { name = "opencv-python-headless", specifier = ">=4.12.0.88" },
     { name = "openvino", specifier = "==2025.4.0" },
     { name = "safetensors", specifier = ">=0.7.0" },
+    { name = "setuptools", specifier = ">=80.9.0" },
     { name = "torch", specifier = ">=2.9.1" },
     { name = "torchvision", specifier = ">=0.24.1" },
 ]
