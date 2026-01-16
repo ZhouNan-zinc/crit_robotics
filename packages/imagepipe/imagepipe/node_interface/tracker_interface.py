@@ -5,6 +5,12 @@ from abc import abstractmethod, ABC
 from rclpy.node import Node
 from rclpy.time import Time
 from rclpy.logging import RcutilsLogger
+from rclpy.qos import (
+    QoSProfile,
+    QoSHistoryPolicy,
+    QoSReliabilityPolicy,
+    QoSDurabilityPolicy,
+)
 from geometry_msgs.msg import (
     Point,
     Quaternion,
@@ -38,7 +44,7 @@ def cxcywh2xyxy(bboxes: np.ndarray):
     y1 = cy - h / 2
     x2 = cx + w / 2
     y2 = cy + h / 2
-    return np.stack([x1, y1, x2, y2], axis=1)
+    return np.stack([x1, y1, x2, y2], axis=-1)
 
 
 class TrackerNodeInterface(Node, ABC):
@@ -56,38 +62,54 @@ class TrackerNodeInterface(Node, ABC):
         self.vision_raw_sub = self.create_subscription(
             Detection2DArray,
             "vision/raw",
-            self.callback
+            self.callback,
+            QoSProfile(
+                history=QoSHistoryPolicy.KEEP_LAST,
+                depth=10,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.VOLATILE,
+            )
         )
 
         self.vision_tracked_pub = self.create_publisher(
             Detection2DArray,
-            "vision/raw",
-            10
-            # TODO: improve qos
+            "vision/tracked",
+            QoSProfile(
+                history=QoSHistoryPolicy.KEEP_LAST,
+                depth=10,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.VOLATILE,
+            )
         )
 
         self.stamp_thres = self.get_clock().now()
 
     def callback(self, msg: Detection2DArray):
-        stamp = Time(seconds=msg.header.stamp.sec, nanoseconds=msg.header.stamp.nanosec)
-        if stamp < self.stamp_thres:
-            self.logger.warning("Message not in order, check your image pipeline. Dropping message.")
-            return
+        stamp = Time.from_msg(msg.header.stamp, clock_type=self.get_clock().clock_type)
+        # if stamp < self.stamp_thres:
+            # self.logger.warning("Message not in order, check your image pipeline. Dropping message.")
+            # return
         self.stamp_thres = stamp
 
         raw_detections = [TrackingObject(
-            class_id=det.results[0].hypothesis.class_id,
-            score=det.results[0].hypothesis.score,
-            bbox=cxcywh2xyxy(np.atleast_2d(np.array([det.bbox.center.x, det.bbox.center.y, det.bbox.size_x, det.bbox.size_y]))),
-            payload=det
+            class_id=int(float(det.results[0].hypothesis.class_id)),
+            score=float(det.results[0].hypothesis.score),
+            bbox=cxcywh2xyxy(np.array([det.bbox.center.position.x, det.bbox.center.position.y, det.bbox.size_x, det.bbox.size_y])),
+            message=det
         ) for det in msg.detections]
 
         trackers = self.update(raw_detections)
 
         tracked_detections = []
         for trk in trackers:
-            trk["payload"].id = trk.id
-            tracked_detections.append(trk)
+            msg = trk.message
+            msg.id = str(int(trk.id))
+            tracked_detections.append(msg)
+
+        self.logger.warning(f"raw detection num: {len(raw_detections)}, tracker num: {len(trackers)}")
+
+        if len(tracked_detections):
+            self.logger.warning(f"tracking 0: {tracked_detections[0]}, type: {type(tracked_detections[0])}")
 
         self.vision_tracked_pub.publish(Detection2DArray(
             header=msg.header,
@@ -110,11 +132,10 @@ class MotTracker(TrackerNodeInterface):
         super().__init__()  
         
         self.mot_tracker = ByteTrack(
-            max_age=30,
-            min_hits=3,
-            iou_threshold=0.3,
-            track_thresh=0.5,
-            det_thresh=0.1
+            max_age=4,
+            min_hits=2,
+            iou_thres=None,
+            conf_thres=0.3
         )
 
     def update(self, detections):

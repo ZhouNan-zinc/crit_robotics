@@ -1,9 +1,11 @@
-from setuptools import find_packages, setup
+import os
 
+from setuptools import find_packages, setup
 from glob import glob
 
 package_name = 'imagepipe'
 
+# HACK: This is not a perfect data_files load method.
 setup(
     name=package_name,
     version='0.0.0',
@@ -12,8 +14,10 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/config', glob('config/*.yaml')),
-        ('share/' + package_name + '/launch', glob('launch/*.py'))
+        ('share/' + package_name + '/config', glob('config/*')),
+        ('share/' + package_name + '/launch', glob('launch/*')),
+        ('share/' + package_name + '/yolo/v10', glob('**/config.json', recursive=True)),
+        ('share/' + package_name + '/yolo/v10', glob('**/pytorch_model.bin', recursive=True))
     ],
     install_requires=['setuptools'],
     zip_safe=True,

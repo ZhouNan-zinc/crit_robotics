@@ -58,8 +58,8 @@ cv::Mat shrink_resize_crop(const cv::Mat& image, const cv::Size& size)
         image,
         resized,
         cv::Size(
-            std::round(image.cols / scale_ratio),
-            std::round(image.rows / scale_ratio)
+            std::round(image.cols * scale_ratio),
+            std::round(image.rows * scale_ratio)
         ),
         0., 0., cv::INTER_AREA);
 

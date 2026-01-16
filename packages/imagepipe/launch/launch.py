@@ -16,13 +16,13 @@ def generate_launch_description() -> LaunchDescription:
             package="imagepipe",
             executable="detector",
             name="detector",
-            parameters=[config]
+            parameters=[config],
         ),
 
-        Node(
-            package="imagepipe",
-            executable="tracker",
-            name="tracker",
-            parameters=[config]
-        )
+        # Node(
+        #     package="imagepipe",
+        #     executable="tracker",
+        #     name="tracker",
+        #     parameters=[config],
+        # )
     ])

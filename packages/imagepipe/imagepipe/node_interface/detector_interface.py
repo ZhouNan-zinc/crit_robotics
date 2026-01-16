@@ -3,12 +3,18 @@
 import os
 from abc import abstractmethod, ABC
 
+import cv2
+import torch
 import numpy as np
 from rclpy.node import Node
 from rclpy.logging import RcutilsLogger
-from rclpy.qos import QoSProfile
+from rclpy.qos import (
+    QoSProfile,
+    QoSHistoryPolicy,
+    QoSReliabilityPolicy,
+    QoSDurabilityPolicy,
+)
 from ament_index_python import get_package_share_directory
-from cv_bridge import CvBridge
 from image_transport_py import ImageTransport
 from sensor_msgs.msg import (
     Image,
@@ -33,8 +39,19 @@ from vision_msgs.msg import (
 from ..runtime.models import Yolov10PoseModel
 from ..solutions.pose_estimate import pose_estimate
 
-BIG_ARMOR_POINTS: list[tuple[float, float, float]] = []
-SMALL_ARMOR_POINTS: list[tuple[float, float, float]] = []
+
+SMALL_ARMOR_POINTS: list[tuple[float, float, float]] = [
+    (1e-6, 6.75e-2, 2.75e-2),
+    (1e-6, -6.75e-2, 2.75e-2),
+    (1e-6, -6.75e-2, -2.75e-2),
+    (1e-6, 6.75e-2, -2.75e-2)
+]
+BIG_ARMOR_POINTS: list[tuple[float, float, float]] = [
+    (1e-6, 1.15e-1, 2.9e-2),
+    (1e-6, -1.15e-1, 2.9e-2),
+    (1e-6, -1.15e-1, -2.9e-2),
+    (1e-6, 1.15e-1, -2.9e-2)
+]
 BASE_POINTS: list[tuple[float, float, float]] = []
 
 CLASS_TO_POINTS = {
@@ -45,10 +62,61 @@ CLASS_TO_POINTS = {
     5: BASE_POINTS,
 }
 
+def cimage_to_cv2_bgr(cimage: Image) -> np.ndarray:
+    encoding = (cimage.encoding or "").lower()
+    height, width, step = int(cimage.height), int(cimage.width), int(cimage.step)
+
+    if encoding in ("bgr8", "rgb8"):
+        channels = 3
+        image = np.ndarray(
+            shape=(height, width, channels),
+            dtype=np.uint8,
+            buffer=memoryview(cimage.data),
+            strides=(step, channels, 1),
+        )
+        if encoding == "rgb8":
+            image = image[:, :, ::-1].copy()
+        return image
+
+    if encoding in ("bgra8", "rgba8"):
+        channels = 4
+        image = np.ndarray(
+            shape=(height, width, channels),
+            dtype=np.uint8,
+            buffer=memoryview(cimage.data),
+            strides=(step, channels, 1),
+        )
+        return cv2.cvtColor(
+            image,
+            cv2.COLOR_BGRA2BGR if encoding == "bgra8" else cv2.COLOR_RGBA2BGR,
+        )
+
+    if encoding == "mono8":
+        image = np.ndarray(
+            shape=(height, width),
+            dtype=np.uint8,
+            buffer=memoryview(cimage.data),
+            strides=(step, 1),
+        )
+        return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+    raise ValueError(f"Unsupported image encoding: {cimage.encoding!r}")
+
 class DetectorNodeInterface(Node, ABC):
     """Base node that declares parameters up-front and exposes helpers."""
     node_name = "imagepipe"
 
+    # def __init_subclass__(cls, **kwargs):
+    #     super().__init_subclass__(**kwargs)
+
+    #     orig_init = cls.__init__
+
+    #     def __init__(self, *args, **kw):
+    #         orig_init(self, *args, **kw)
+    #         self.post_init()
+
+    #     cls.__init__ = __init__
+        
     def __init__(self):
         super().__init__(
             node_name=self.node_name,
@@ -62,56 +130,65 @@ class DetectorNodeInterface(Node, ABC):
         
         self.image_subs = [
             it.subscribe_camera(base_topic=f"{topic_prefix}/image_raw",
+                                queue_size=10,
                                 callback=self.callback) 
-            for topic_prefix in self.get_parameter("subscriptions").get_parameter_value()
+            for topic_prefix in self.get_parameter("subscriptions").value
         ]
     
-    @abstractmethod
-    def callback(*args, **kwargs):
-        raise NotImplementedError()
-
     @property
     def logger(self) -> RcutilsLogger:
         return self.get_logger()
+
+    @abstractmethod
+    def callback(*args, **kwargs):
+        raise NotImplementedError()
 
 class YoloPoseDetector(DetectorNodeInterface):
     """"""
 
     def __init__(self):
+
+        pretrained_model = Yolov10PoseModel.from_pretrained(
+            os.path.join(get_package_share_directory("imagepipe"),"yolo", "v10"),
+            use_safetensors=False,
+            weights_only=True,
+            dtype=torch.float32
+        )
+
+        opts = {"device" : "CPU", "config" : {"PERFORMANCE_HINT" : "LATENCY"}}
+        self.model = torch.compile(pretrained_model, backend="openvino", options=opts)
+
         super().__init__()
 
-        self.br = CvBridge()
-
-        self.model = Yolov10PoseModel.from_pretrained("yolo/v10")
-        
         self.vision_raw_pub = self.create_publisher(
             Detection2DArray,
             "vision/raw",
             QoSProfile(
-                history=5
+                history=QoSHistoryPolicy.KEEP_LAST,
+                depth=10,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.VOLATILE,
             )
-            # TODO: finish QoS Profile
         )
         
-        model_name_or_path = self.get_parameter_or("model_name_or_path", "namespace/model")
-        if os.path.exists(os.path.join(get_package_share_directory("imagepipe"), model_name_or_path)):
-            model_name_or_path = os.path.join(get_package_share_directory("imagepipe"), model_name_or_path)
-
-        self.model = Yolov10PoseModel.from_pretrained(
-            model_name_or_path
-        )
+        # HACK:
+        # model_name_or_path = self.get_parameter_or("model_name_or_path", "namespace/model")
+        # if os.path.exists(os.path.join(get_package_share_directory("imagepipe"), model_name_or_path)):
+        #     model_name_or_path = os.path.join(get_package_share_directory("imagepipe"), model_name_or_path)
 
     def callback(self, cimage:Image, cinfo:CameraInfo):
         """Convert incoming image/camera info into detection messages."""
-        image = self.br.imgmsg_to_cv2(cimage, desired_encoding="bgr8")
-        
+        image = cimage_to_cv2_bgr(cimage)
+
         pixel_values = self.model.preprocess(image)
 
-        outputs = self.model(pixel_values)
+        with torch.inference_mode():
 
-        predictions = self.model.postprocess(outputs)
+            outputs = self.model(pixel_values)
 
-        poses = self.estimate_poses_from_predictions(predictions)
+            predictions = self.model.postprocess(outputs)
+
+        poses = self.estimate_poses_from_predictions(predictions, cinfo)
 
         self.publish_message_from_prediction(cinfo.header, predictions, poses)
 
@@ -131,6 +208,9 @@ class YoloPoseDetector(DetectorNodeInterface):
         Returns:
             poses: list of (position, orientation)
         """
+
+        if prediction.ndim == 3 and prediction.shape[0] == 1:
+            prediction = prediction[0]
 
         camera_matrix = np.array(cinfo.k, dtype=np.float64).reshape(3, 3)
         distortion_coefficients = np.array(cinfo.d, dtype=np.float64)
@@ -160,7 +240,8 @@ class YoloPoseDetector(DetectorNodeInterface):
                 distortion_coefficients,
             )
 
-            poses.append((position, orientation))
+            if position is not None and orientation is not None:
+                poses.append((position, orientation))
 
         return poses
     
@@ -170,13 +251,13 @@ class YoloPoseDetector(DetectorNodeInterface):
         prediction,
         poses
     ):
-        self.vision_pub.publish(Detection2DArray(
+        self.vision_raw_pub.publish(Detection2DArray(
             header=header,
             detections=[Detection2D(
                 header=header,
                 results=[ObjectHypothesisWithPose(
                     hypothesis=ObjectHypothesis(
-                        class_id=int(pred[5]),
+                        class_id=str(int(pred[5])),
                         score=float(pred[4])
                     ),
                     pose=PoseWithCovariance(

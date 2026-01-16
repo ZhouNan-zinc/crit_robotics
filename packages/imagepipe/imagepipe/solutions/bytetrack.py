@@ -49,11 +49,10 @@ def convert_x_to_bbox(x,score=None):
     w = np.sqrt(x[2] * x[3])
     h = x[2] / w
 
-    if(score==None):
-        return np.array([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.]).reshape((1,4))
-    else:
-        return np.array([x[0]-w/2.,x[1]-h/2.,x[0]+w/2.,x[1]+h/2.,score]).reshape((1,5))
-
+    arr = np.array([x[0]-w/2., x[1]-h/2., x[0]+w/2., x[1]+h/2.]).reshape(-1)
+    if score is None:
+        return arr.astype(np.float32)
+    return np.concat([arr, np.array([score], dtype=np.float32)])
 
 
 class KalmanFilter:
@@ -79,15 +78,22 @@ class KalmanFilter:
 
     def update(self, z):
         """Assimilate a measurement vector ``z`` into the filter state."""
+    def update(self, z):
         z = np.asarray(z).reshape((self.dim_z, 1))
         y = z - self.H @ self.x
         S = self.H @ self.P @ self.H.T + self.R
-        K = self.P @ self.H.T @ np.linalg.pinv(S)
+
+        # --- CHANGED: use solve() instead of pinv() for speed and stability ---
+        # We want: K = P H^T S^{-1}
+        # Solve S * X = (H P)^T  => X = S^{-1} (H P)^T
+        PHt = self.P @ self.H.T                           # (dim_x, dim_z)
+        Sinv_PHtT = np.linalg.solve(S, PHt.T).T            # (dim_x, dim_z)
+        K = Sinv_PHtT
+
         self.x = self.x + K @ y
 
         I = np.eye(self.dim_x)
         self.P = (I - K @ self.H) @ self.P
-
         return self.x
 
 class TrackingObject:
@@ -101,11 +107,9 @@ class TrackingObject:
     :var info: Description
     :var detections: Description
     :var trackers: Description
-    :var iou_threshold: Description
-    :vartype iou_threshold: float
+    :var iou_thres: Description
+    :vartype iou_thres: float
     """
-
-    count = 0
 
     _F = np.array([
         [1,0,0,0,1,0,0],
@@ -134,14 +138,17 @@ class TrackingObject:
     ):
         self.class_id = class_id
         self.score = score
-        self.bbox = np.asarray(bbox) if bbox else None
-        self.mask = np.asarray(mask) if mask else None
+        self.bbox = np.asarray(bbox) if bbox is not None else None
+        self.mask = np.asarray(mask) if mask is not None else None
+        
+        self._payload = set()
 
         for k, v in kwargs.items():
+            self._payload.add(k)
             setattr(self, k, v)
 
         self.post_init()
-    
+
     def post_init(self):
         self._kf = KalmanFilter(dim_x=7, dim_z=4) 
         self._kf.F = TrackingObject._F
@@ -160,25 +167,15 @@ class TrackingObject:
         self._hits = 0
         self._hit_streak = 0
         self._age = 0
-
-        cls = type(self)
-        self._id = cls.count
-        cls.count += 1
-
-        self.payload : dict[str, Any] = []
-
-    def __getitem__(self, key:str):
-        return self.payload.get(key, None)
-    
-    def __setitem__(self, name:str, value:...):
-        if name == "id":
-            raise ValueError("Key `id` can not pass to tracker.")
-        self.payload[name] = value
+        self._id = None
 
     @property
-    def id(self) -> int:
+    def id(self) -> int|None:
         return self._id
-
+    
+    @id.setter
+    def id(self, value: int | None):
+        self._id = int(value) if value is not None else value
 
     def update(self, obj: "TrackingObject"):
         """
@@ -192,14 +189,16 @@ class TrackingObject:
         self.class_id = obj.class_id
         self.score = obj.score
         self.bbox = obj.bbox
-        self.payload = obj.payload
+        self.mask = obj.mask
+        
+        for k in obj._payload:
+            setattr(self, k, getattr(obj, k))
 
         self._time_since_update = 0
         self._history = []
         self._hits += 1
         self._hit_streak += 1
         self._kf.update(convert_bbox_to_z(self.bbox))
-
 
 
     def predict(self):
@@ -216,166 +215,170 @@ class TrackingObject:
         self._history.append(convert_x_to_bbox(self._kf.x))
         return self._history[-1]
 
-    @property
-    def get_info(self):
-        """
-        Return the latest detection info with the Kalman-refined box.
-
-        Returns
-        -------
-        np.ndarray
-            The concatenation of the predicted bbox ``[x1, y1, x2, y2]`` and
-            the additional fields supplied by the detector (score, class, ...).
-        """
-        bbox = convert_x_to_bbox(self._kf.x).reshape(-1)
-        return np.concatenate([bbox, self.bbox])
-
 
 def linear_assignment(cost_matrix):
     """
     Solve the linear assignment problem used to match detections with trackers.
     """
-    _, x, y = lap.lapjv(cost_matrix, extend_cost=True)
-    return np.array([[y[i],i] for i in x if i >= 0]) #
+    cost_matrix = np.asarray(cost_matrix, dtype=np.float32)
+    _, x, _ = lap.lapjv(cost_matrix, extend_cost=True)
+
+    matches = []
+    for row, col in enumerate(x):
+        if col >= 0:
+            matches.append([row, col])   # row=det_idx, col=trk_idx
+    return np.asarray(matches, dtype=int)
 
 
-def iou_batch(bb_test, bb_gt):
-    """
-    Compute pairwise IOU for arrays of `[x1, y1, x2, y2]` boxes.
-    """
-    bb_gt = np.expand_dims(bb_gt, 0)
-    bb_test = np.expand_dims(bb_test, 1)
-    
-    xx1 = np.maximum(bb_test[..., 0], bb_gt[..., 0])
-    yy1 = np.maximum(bb_test[..., 1], bb_gt[..., 1])
-    xx2 = np.minimum(bb_test[..., 2], bb_gt[..., 2])
-    yy2 = np.minimum(bb_test[..., 3], bb_gt[..., 3])
+@numba.njit(fastmath=True, cache=True)
+def generalized_iou(a, b):
+    n = a.shape[0]
+    m = b.shape[0]
+    result = np.zeros((n, m), dtype=np.float32)
+    for i in range(n):
+        ax1 = a[i, 0]
+        ay1 = a[i, 1]
+        ax2 = a[i, 2]
+        ay2 = a[i, 3]
 
-    w = np.maximum(0., xx2 - xx1)
-    h = np.maximum(0., yy2 - yy1)
+        aw = ax2 - ax1
+        ah = ay2 - ay1
+        if aw <= 0.0 or ah <= 0.0:
+            a_area = 0.0
+        else:
+            a_area = aw * ah
 
-    wh = w * h
-    o = wh / ((bb_test[..., 2] - bb_test[..., 0]) * (bb_test[..., 3] - bb_test[..., 1])                                      
-        + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)                                              
-    return(o)  
+        for j in range(m):
+            bx1 = b[j, 0]
+            by1 = b[j, 1]
+            bx2 = b[j, 2]
+            by2 = b[j, 3]
 
-
-@numba.njit(fastmath=True)
-def iou_batch_jit(bb_test, bb_gt):
-    """
-    Compute IOU with a numba-optimised double loop for large batch counts.
-    """
-    num_test = bb_test.shape[0]
-    num_gt = bb_gt.shape[0]
-    result = np.zeros((num_test, num_gt), dtype=np.float64)
-
-    for i in range(num_test):
-        x1 = bb_test[i, 0]
-        y1 = bb_test[i, 1]
-        x2 = bb_test[i, 2]
-        y2 = bb_test[i, 3]
-        area_test = (x2 - x1) * (y2 - y1)
-
-        for j in range(num_gt):
-            gx1 = bb_gt[j, 0]
-            gy1 = bb_gt[j, 1]
-            gx2 = bb_gt[j, 2]
-            gy2 = bb_gt[j, 3]
-            area_gt = (gx2 - gx1) * (gy2 - gy1)
-
-            xx1 = x1 if x1 > gx1 else gx1
-            yy1 = y1 if y1 > gy1 else gy1
-            xx2 = x2 if x2 < gx2 else gx2
-            yy2 = y2 if y2 < gy2 else gy2
-
-            w = xx2 - xx1
-            if w <= 0.0:
-                continue
-            h = yy2 - yy1
-            if h <= 0.0:
-                continue
-
-            inter = w * h
-            union = area_test + area_gt - inter
-            if union <= 0.0:
-                result[i, j] = 0.0
+            bw = bx2 - bx1
+            bh = by2 - by1
+            if bw <= 0.0 or bh <= 0.0:
+                b_area = 0.0
             else:
-                result[i, j] = inter / union
+                b_area = bw * bh
+
+            inter_w = min(ax2, bx2) - max(ax1, bx1)
+            inter_h = min(ay2, by2) - max(ay1, by1)
+            if inter_w <= 0.0 or inter_h <= 0.0:
+                inter = 0.0
+            else:
+                inter = inter_w * inter_h
+
+            union = a_area + b_area - inter
+            if union <= 0.0:
+                iou = 0.0
+            else:
+                iou = inter / union
+
+            cx1 = ax1 if ax1 < bx1 else bx1
+            cy1 = ay1 if ay1 < by1 else by1
+            cx2 = ax2 if ax2 > bx2 else bx2
+            cy2 = ay2 if ay2 > by2 else by2
+
+            cw = cx2 - cx1
+            ch = cy2 - cy1
+            if cw <= 0.0 or ch <= 0.0:
+                result[i, j] = iou
+            else:
+                c_area = cw * ch
+                result[i, j] = iou - (c_area - union) / c_area
 
     return result
 
 
+def assign(detections: list[TrackingObject],
+           trackers: list[TrackingObject],
+           iou_thres: float = 0.3):
 
+    D = len(detections)
+    T = len(trackers)
 
-def assign(detections: list[TrackingObject], trackers: list[TrackingObject], iou_threshold:float = 0.3):
-    """
-    Assign detections to tracker predictions using an IOU threshold.
+    if D == 0 or T == 0:
+        matches = np.empty((0, 2), dtype=int)
+        unmatched_detections = np.arange(D, dtype=int)
+        unmatched_trackers = np.arange(T, dtype=int)
+        return matches, unmatched_detections, unmatched_trackers
 
-    Parameters
-    ----------
-    detections : np.ndarray
-        Array of boxes ``[N, 4]`` in ``[x1, y1, x2, y2]`` format.
-    trackers : np.ndarray
-        Array of tracker predictions ``[M, 4]``.
-    iou_threshold : float
-        Minimum IOU for an association to be accepted.
+    # --- CHANGED: build bbox arrays (float32) ---
+    bbox_detections = np.asarray([det.bbox for det in detections], dtype=np.float32).reshape(-1, 4)
+    bbox_trackers   = np.asarray([trk.bbox for trk in trackers], dtype=np.float32).reshape(-1, 4)
 
-    Returns
-    -------
-    tuple
-        ``(matches, unmatched_detections)`` with ``matches`` shaped ``[K, 2]``.
-    """
-    
-    bbox_detections = np.asarray([det.bbox] for det in detections)
-    bbox_trackers = np.asarray([trk.bbox] for trk in trackers)
-    iou_matrix = iou_batch(
-        bbox_detections, bbox_trackers)
-    
-    class_id_detections = np.asarray([det.class_id] for det in detections)
-    class_id_trackers = np.asarray([trk.class_id] for trk in trackers)
-    mask = class_id_detections == class_id_trackers # FIXME: mask generated by &
+    # --- CHANGED: class id arrays ---
+    class_id_detections = np.asarray([det.class_id for det in detections], dtype=np.int32)
+    class_id_trackers   = np.asarray([trk.class_id for trk in trackers], dtype=np.int32)
 
-    iou_matrix = iou_matrix & mask
+    # --- CHANGED: build IOU matrix by class blocks (compute only same-class pairs) ---
+    iou_matrix = np.zeros((D, T), dtype=np.float32)
 
+    classes = np.intersect1d(np.unique(class_id_detections), np.unique(class_id_trackers))
+    for c in classes:
+        det_idx = np.where(class_id_detections == c)[0]
+        trk_idx = np.where(class_id_trackers == c)[0]
+        if det_idx.size == 0 or trk_idx.size == 0:
+            continue
+
+        # compute IOU only for this class block
+        block_iou = generalized_iou(bbox_detections[det_idx], bbox_trackers[trk_idx])
+        iou_matrix[np.ix_(det_idx, trk_idx)] = block_iou
+
+    # Assignment
     if min(iou_matrix.shape) > 0:
-        a = (iou_matrix > iou_threshold).astype(np.int32)
+        a = (iou_matrix > iou_thres).astype(np.int32)
+
         if a.sum(1).max() == 1 and a.sum(0).max() == 1:
-            matched_indices = np.stack(np.where(a), axis=1)
+            matched_indices = np.stack(np.where(a), axis=1).astype(int)
         else:
             matched_indices = linear_assignment(-iou_matrix)
+            matched_indices = np.asarray(matched_indices, dtype=int).reshape(-1, 2)
     else:
-        matched_indices = np.empty(shape=(0,2))
+        matched_indices = np.empty((0, 2), dtype=int)
 
-    matched_detections = detections[matched_indices]
-    unmatched_detections = [idx for idx in range(len(detections)) if idx not in matched_indices]
+    # --- CHANGED: filter matches by IOU threshold (important after Hungarian) ---
+    if len(matched_indices) > 0:
+        pair_ious = iou_matrix[matched_indices[:, 0], matched_indices[:, 1]]
+        keep = pair_ious >= iou_thres
+        matches = matched_indices[keep]
+    else:
+        matches = np.empty((0, 2), dtype=int)
 
-    return matched_detections, unmatched_detections
+    # unmatched sets
+    matched_det_ids = matches[:, 0] if len(matches) > 0 else np.array([], dtype=int)
+    matched_trk_ids = matches[:, 1] if len(matches) > 0 else np.array([], dtype=int)
 
-    # TODO: filter out matched with low IOU
-    # matches = []
-    # for m in matched_indices:
-    #     if(iou_matrix[m[0], m[1]] < iou_threshold):
-    #         unmatched_detections.append(m[0])
-    #     else:
-    #         matches.append(m.reshape(1,2))
+    # --- CHANGED: faster unmatched computation via boolean mask (optional but clean) ---
+    det_mask = np.zeros(D, dtype=bool)
+    trk_mask = np.zeros(T, dtype=bool)
+    det_mask[matched_det_ids] = True
+    trk_mask[matched_trk_ids] = True
 
-    # if(len(matches)==0):
-    #     matches = np.empty((0,2),dtype=int)
-    # else:
-    #     matches = np.concatenate(matches,axis=0)
+    unmatched_detections = np.where(~det_mask)[0].astype(int)
+    unmatched_trackers   = np.where(~trk_mask)[0].astype(int)
 
-    # return matches, np.array(unmatched_detections)
+    return matches, unmatched_detections, unmatched_trackers
 
 
 class ByteTrack:
     """
     ByteTrack tracker that keeps the full detection info vector per track.
     """
-    def __init__(self, max_age=30, min_hits=3, iou_thres=0.3, conf_thres=0.5):
+
+    count = 0
+
+    def __init__(
+        self,
+        max_age:int=30,
+        min_hits:int=3,
+        iou_thres:float|None = None,
+        conf_thres:float|None = None
+    ):
         self.max_age = max_age
         self.min_hits = min_hits
-        self.iou_thres = iou_thres
-        self.conf_thres = conf_thres
+        self.iou_thres = iou_thres if iou_thres is not None else -np.inf
+        self.conf_thres = conf_thres if conf_thres is not None else 0.
         self.frame_count = 0
         self.trackers: list[TrackingObject] = []
 
@@ -390,28 +393,42 @@ class ByteTrack:
             bbox = trk.predict()
             if np.any(np.isnan(bbox)):
                 self.trackers.pop(idx)
+                continue
             self.trackers[idx].bbox = bbox
 
-        high_score_detections = []
-        low_score_detections = []
-        
-        for det in reversed(detections):
-            if det.score >= self.conf_thres:
-                high_score_detections.append(detections.pop())
-            else:
-                low_score_detections.append(detections.pop())
 
-        matched_high, unmatched_high = assign(
-            high_score_detections, self.trackers, self.iou_thres)
+        high_score_detections = [det for det in detections if det.score >= self.conf_thres]
+        low_score_detections  = [det for det in detections if det.score <  self.conf_thres]
 
-        for idx, m in enumerate(matched_high):
-            self.trackers[idx].update(m)
+        matches_high, unmatched_det_high, unmatched_trk_high = assign(
+            high_score_detections, self.trackers, self.iou_thres
+        )
 
-        if len(unmatched_high) > 0 and len(low_score_detections) > 0:
-            matched_low, _ = assign(
-                low_score_detections, self.trackers, self.iou_thres)
-            for idx, m in enumerate(matched_low):
-                self.trackers[idx].update(m)
+        for det_idx, trk_idx in matches_high:
+            self.trackers[trk_idx].update(high_score_detections[det_idx])
 
-        self.trackers.extend(unmatched_high)
+        if len(unmatched_trk_high) > 0 and len(low_score_detections) > 0:
+            remaining_trackers = [self.trackers[i] for i in unmatched_trk_high]
+
+            matches_low, _, _ = assign(
+                low_score_detections, remaining_trackers, self.iou_thres
+            )
+
+            for det_idx, local_trk_idx in matches_low:
+                trk_idx = unmatched_trk_high[local_trk_idx]  # map local index -> global index
+                self.trackers[trk_idx].update(low_score_detections[det_idx])
+
+        for det_idx in unmatched_det_high:
+            trk = high_score_detections[det_idx]
+            trk.id = ByteTrack.count
+            ByteTrack.count += 1
+            self.trackers.append(trk)
+
+        self.trackers = [t for t in self.trackers if t._time_since_update <= self.max_age]
+
+        outputs = []
+        for t in self.trackers:
+            if t._hits >= self.min_hits or self.frame_count <= self.min_hits:
+                outputs.append(t)
+
         return self.trackers

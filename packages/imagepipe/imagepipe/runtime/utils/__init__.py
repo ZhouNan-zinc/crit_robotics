@@ -16,7 +16,6 @@ from .constants import (
     MULTIPLE_CHOICE_DUMMY_INPUTS,
     DUMMY_INPUTS,
     DUMMY_MASK,
-    PACKAGE_DIRECTORY,
 )
 from .file_utils import (
     resolve_file,

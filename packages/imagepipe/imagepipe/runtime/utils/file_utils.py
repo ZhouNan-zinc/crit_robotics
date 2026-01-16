@@ -7,7 +7,6 @@ from .constants import (
     SAFE_WEIGHTS_INDEX_NAME,
     WEIGHTS_NAME,
     WEIGHTS_INDEX_NAME,
-    PACKAGE_DIRECTORY
 )
 from .logging import getLogger
 
@@ -196,12 +195,7 @@ def get_resolved_checkpoint_files(
     is_sharded = False
 
     if pretrained_model_name_or_path is not None:
-        if os.path.isdir(os.path.join(PACKAGE_DIRECTORY, pretrained_model_name_or_path)) and not os.path.isdir(pretrained_model_name_or_path):
-            pretrained_model_path = os.path.join(PACKAGE_DIRECTORY, pretrained_model_name_or_path)
-        else:
-            pretrained_model_path = pretrained_model_name_or_path
-
-        if os.path.isdir(pretrained_model_path):
+        if os.path.isdir(pretrained_model_name_or_path):
             if transformers_explicit_filename is not None:
                 # If the filename is explicitly defined, load this by default.
                 archive_file = os.path.join(pretrained_model_name_or_path, transformers_explicit_filename)

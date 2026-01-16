@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, TypeVar, Union
 from .utils import logging
 from .utils import (
     CONFIG_NAME,
-    PACKAGE_DIRECTORY
 )
 
 if TYPE_CHECKING:
@@ -592,8 +591,8 @@ class PreTrainedConfig:
                 
                 if os.path.exists(os.path.join(pretrained_model_name_or_path, configuration_file)):
                     resolved_config_file = os.path.join(pretrained_model_name_or_path, configuration_file)
-                elif os.path.exists(os.path.join(PACKAGE_DIRECTORY, pretrained_model_name_or_path, configuration_file)):
-                    resolved_config_file = os.path.join(PACKAGE_DIRECTORY, pretrained_model_name_or_path, configuration_file)
+                elif os.path.exists(os.path.join(pretrained_model_name_or_path, configuration_file)):
+                    resolved_config_file = os.path.join(pretrained_model_name_or_path, configuration_file)
                 else:
                     return None, kwargs
             except OSError:

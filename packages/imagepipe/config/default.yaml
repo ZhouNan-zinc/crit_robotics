@@ -1,0 +1,7 @@
+detector:
+  ros__parameters:
+    subscriptions: ["/hikcam"]
+
+tracker:
+  ros__parameters:
+    param: "default"

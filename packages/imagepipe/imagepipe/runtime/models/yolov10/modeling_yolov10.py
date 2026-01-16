@@ -4,8 +4,9 @@ import copy
 import numpy as np
 import torch
 import torch.nn as nn
-import torchvision.transforms.v2 as T
+from torchvision.transforms.v2 import functional as F
 
+from PIL.Image import Image
 from ... import PreTrainedConfig, PreTrainedModel
 
 def initialize_weights(model):
@@ -925,20 +926,11 @@ class Pose(Detect):
         """Decode keypoints from predictions."""
         bs = kpts.shape[0]  # batch size
         ndim = self.kpt_shape[1]
-        if self.export:
-            # NCNN fix
-            y = kpts.view(bs, *self.kpt_shape, -1)
-            a = (y[:, :, :2] * 2.0 + (self.anchors - 0.5)) * self.strides
-            if ndim == 3:
-                a = torch.cat((a, y[:, :, 2:3].sigmoid()), 2)
-            return a.view(bs, self.nk, -1)
-        else:
-            y = kpts.clone()
-            if ndim == 3:
-                y[:, 2::ndim].sigmoid_()
-            y[:, 0::ndim] = (y[:, 0::ndim] * 2.0 + (self.anchors[0] - 0.5)) * self.strides
-            y[:, 1::ndim] = (y[:, 1::ndim] * 2.0 + (self.anchors[1] - 0.5)) * self.strides
-            return y
+        y = kpts.view(bs, *self.kpt_shape, -1)
+        a = (y[:, :, :2] * 2.0 + (self.anchors - 0.5)) * self.strides
+        if ndim == 3:
+            a = torch.cat((a, y[:, :, 2:3].sigmoid()), 2)
+        return a.view(bs, self.nk, -1)
 
     @staticmethod
     def postprocess(preds: torch.Tensor, max_det: int, nc: int = 80, kpt_shape: tuple = (17, 3)) -> torch.Tensor:
@@ -1195,8 +1187,6 @@ class Yolov10PoseModel(PreTrainedModel):
 
         self.stride = self.build_stride(ch)
 
-        self.transform = self.build_transform()
-
         # Init weights, biases
         initialize_weights(self)
 
@@ -1328,24 +1318,29 @@ class Yolov10PoseModel(PreTrainedModel):
         bn = tuple(v for k, v in torch.nn.__dict__.items() if "Norm" in k)  # normalization layers, i.e. BatchNorm2d()
         return sum(isinstance(v, bn) for v in self.modules()) < thresh  # True if < 'thresh' BatchNorm layers in model
 
-    def build_transform(self):
-        return T.Compose([
-            T.ToImage(),
-            T.ToDtype(self.dtype)
-        ])
+    def preprocess(self, image: Image|np.ndarray):
+        return F.center_crop(F.resize(F.to_dtype(F.to_image(image), dtype=self.dtype, scale=True
+                          ), 640), [640,640]).unsqueeze(0).to(self.device).to(self.dtype)  # [1,3,H,W] float32 0~1
 
-    def preprocess(self, image: np.ndarray):
-        return self.transform(image)
-
-    def postprocess(self, prediction: torch.Tensor) -> np.ndarray:
+    def postprocess(self, prediction: tuple[torch.Tensor, torch.Tensor]|torch.Tensor) -> np.ndarray:
+        if isinstance(prediction, tuple):
+            return self.postprocess(prediction[0])
+        
         assert 2 <= prediction.ndim <= 3
 
         if prediction.ndim == 2:
             prediction = [prediction]
 
+
         results = end2end_fastnms(prediction)
 
-        return xyxy2cxcywh(np.asarray(results))
+        if len(results) == 1:
+            results = results[0]
+            
+        # HACK: do not support batch
+        outputs = np.concat((xyxy2cxcywh(results[:, :4]), results[:, 4:]), axis=1)
+
+        return outputs
 
 
     
