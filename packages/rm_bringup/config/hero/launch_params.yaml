@@ -1,0 +1,18 @@
+#相机到pitch转轴的定义(camera 减 pitch)（单位m）
+#面向相机y以右为正
+camera_to_pitch:
+  xyz: "\"0.1205 -0.08  0.09359\""
+  rpy: "\"0.0  0.0  0.0\""
+camera2_to_pitch:
+  xyz: "\"0.16831 0.0 0.09961\""
+  # rpy: "\"0.0 0.197 0.08\""
+  rpy: "\"0.0 0.202 0.0\""
+
+#云台pitch转轴到yaw转轴的xyz距离 (pitch 减 yaw)
+#取pitch转轴与枪管中线相交点
+#z应为0
+pitch2yaw_t: [0.0, 0.0, 0.0]
+
+detector_log_level: INFO
+tracker_log_level: INFO
+serial_log_level: INFO

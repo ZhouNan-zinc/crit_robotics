@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<robot name="rm_gimbal"
+  xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="pitch2cam_xyz" default="0.10 0 0.05" />
+  <xacro:arg name="pitch2cam_rpy" default="0 0 0" />
+
+  <xacro:arg name="pitch2cam2_xyz" default="0.10 0 0.05" />
+  <xacro:arg name="pitch2cam2_rpy" default="0 0 0" />
+
+  <xacro:arg name="yaw2pitch_xyz" default="0.0 0.0 0.0" />
+
+
+  <link name="odom" />
+  <!-- 车体自身为基准的坐标系，RPY右手坐标系，面向轴的正方向取逆时针为正值，pitch、roll取水平面为零点，yaw零点任取，电控依上规定发送imu -->
+
+  <link name="gimbal" />
+
+  <!-- 平衡上下小陀螺轮腿z方向上下移动时odom系为动坐标系，由于KF模型暂未引入vz状态量，为保证收敛与精度，电控额外给入车身高、自身vz，gimbal系为动坐标系，对应云台，odom系对应车腿，一切坐标运算优先转换到静坐标系odom中 -->
+  <joint name="leg_joint" type="prismatic">
+    <parent link="odom"/>
+    <child link="gimbal"/>
+    <axis xyz="0 0 1"/> <!-- 指定关节沿z轴方向 -->
+    <limit lower="-1.0" upper="1.0" effort="1000" velocity="0.2"/>
+  </joint>
+
+  <link name="pitch_link" />
+
+  <joint name="gimbal_joint" type="floating">
+    <parent link="gimbal" />
+    <child link="pitch_link" />
+  </joint>
+
+  <link name="camera_link" />
+  <link name="camera2_link" />
+
+  <joint name="camera_joint" type="fixed">
+    <origin xyz="$(arg pitch2cam_xyz)" rpy="$(arg pitch2cam_rpy)" />
+    <parent link="pitch_link" />
+    <child link="camera_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <joint name="camera2_joint" type="fixed">
+    <origin xyz="$(arg pitch2cam2_xyz)" rpy="$(arg pitch2cam2_rpy)" />
+    <parent link="pitch_link" />
+    <child link="camera2_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <link name="camera_optical_frame" />
+  <link name="camera2_optical_frame" />
+
+  <joint name="camera_optical_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}" />
+    <parent link="camera_link" />
+    <child link="camera_optical_frame" />
+  </joint>
+
+  <joint name="camera2_optical_joint" type="fixed">
+    <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}" />
+    <parent link="camera2_link" />
+    <child link="camera2_optical_frame" />
+  </joint>
+
+</robot>

@@ -1,0 +1,27 @@
+image_width: 1440
+image_height: 1080
+camera_name: narrow_stereo
+# 4mm 镜头， 对角元近似于300 * 焦距
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [1750.89269,    0.     ,  734.65174,
+            0.     , 1750.05911,  541.89143,
+            0.     ,    0.     ,    1.     ]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [-0.099307, 0.083355, 0.001224, 0.000311, 0.000000]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1., 0., 0.,
+         0., 1., 0.,
+         0., 0., 1.]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [1750.26746,    0.     ,  735.00286,    0.     ,
+            0.     , 1750.44312,  542.38245,    0.     ,
+            0.     ,    0.     ,    1.     ,    0.     ]
