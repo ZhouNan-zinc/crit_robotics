@@ -19,10 +19,10 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[config],
         ),
 
-        # Node(
-        #     package="imagepipe",
-        #     executable="tracker",
-        #     name="tracker",
-        #     parameters=[config],
-        # )
+        Node(
+            package="imagepipe",
+            executable="tracker",
+            name="tracker",
+            parameters=[config],
+        )
     ])

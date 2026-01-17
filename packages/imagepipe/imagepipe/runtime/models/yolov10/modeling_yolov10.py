@@ -1322,7 +1322,7 @@ class Yolov10PoseModel(PreTrainedModel):
         return F.center_crop(F.resize(F.to_dtype(F.to_image(image), dtype=self.dtype, scale=True
                           ), 640), [640,640]).unsqueeze(0).to(self.device).to(self.dtype)  # [1,3,H,W] float32 0~1
 
-    def postprocess(self, prediction: tuple[torch.Tensor, torch.Tensor]|torch.Tensor) -> np.ndarray:
+    def postprocess(self, prediction: tuple[torch.Tensor|np.ndarray, torch.Tensor|np.ndarray]|torch.Tensor|np.ndarray) -> np.ndarray:
         if isinstance(prediction, tuple):
             return self.postprocess(prediction[0])
         

@@ -5,6 +5,7 @@ from abc import abstractmethod, ABC
 
 import cv2
 import torch
+import openvino as ov
 import numpy as np
 from rclpy.node import Node
 from rclpy.logging import RcutilsLogger
@@ -148,15 +149,19 @@ class YoloPoseDetector(DetectorNodeInterface):
 
     def __init__(self):
 
-        pretrained_model = Yolov10PoseModel.from_pretrained(
+        self.model = Yolov10PoseModel.from_pretrained(
             os.path.join(get_package_share_directory("imagepipe"),"yolo", "v10"),
             use_safetensors=False,
             weights_only=True,
             dtype=torch.float32
         )
 
-        opts = {"device" : "CPU", "config" : {"PERFORMANCE_HINT" : "LATENCY"}}
-        self.model = torch.compile(pretrained_model, backend="openvino", options=opts)
+        dummy_inputs = torch.randn((1, 3, 640, 640)).to(
+            self.model.device).to(self.model.dtype)
+
+        intermediate_model = ov.convert_model(self.model, example_input=dummy_inputs, verbose=True)
+        
+        self.ov_model = ov.compile_model(intermediate_model, device_name="AUTO")
 
         super().__init__()
 
@@ -181,12 +186,12 @@ class YoloPoseDetector(DetectorNodeInterface):
         image = cimage_to_cv2_bgr(cimage)
 
         pixel_values = self.model.preprocess(image)
+        
+        inputs = [pixel_values.cpu().numpy()]
+        
+        outputs = self.ov_model(inputs)
 
-        with torch.inference_mode():
-
-            outputs = self.model(pixel_values)
-
-            predictions = self.model.postprocess(outputs)
+        predictions = self.model.postprocess(next(iter(outputs.values())))
 
         poses = self.estimate_poses_from_predictions(predictions, cinfo)
 
