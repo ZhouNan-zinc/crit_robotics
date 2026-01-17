@@ -3,6 +3,7 @@
 #include <rclcpp/node.hpp>
 #include <rcl_interfaces/msg/set_parameters_result.hpp>
 #include <opencv2/core/mat.hpp>
+#include <boost/asio/thread_pool.hpp>
 
 namespace rclcpp {
 class Parameter;
@@ -48,11 +49,12 @@ cv::Mat shrink_resize_crop(const cv::Mat& image, const cv::Size& size);
 class CameraNodeInterface : public rclcpp::Node {
 public:
     CameraNodeInterface();
+    ~CameraNodeInterface();
 
     /**
      * @brief Publish an OpenCV frame by converting it to sensor_msgs/Image.
      */
-    virtual void publish(const cv::Mat& image);
+    virtual void publish(cv::Mat image);
 
     /**
      * @brief Default implementation logs unsupported parameter updates.
@@ -81,4 +83,6 @@ private:
     std::shared_ptr<camera_info_manager::CameraInfoManager> cinfo_manager;
     std::shared_ptr<rclcpp::node_interfaces::OnSetParametersCallbackHandle> callback_handle;
     std::shared_ptr<rclcpp::TimerBase> timer;
+
+    boost::asio::thread_pool pool;
 };

@@ -2,6 +2,7 @@
 
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include <boost/asio/post.hpp>
 
 #include <camera_info_manager/camera_info_manager.hpp>
 #include <image_transport/image_transport.hpp>
@@ -41,49 +42,6 @@ std::string deduce_encoding(const cv::Mat &image)
 }
 
 
-
-cv::Mat shrink_resize_crop(const cv::Mat& image, const cv::Size& size)
-{
-    /// NOTE: If got negative size, this can also work.
-    double scale_ratio = std::max(
-        std::max(
-            std::fabs(1.0 * size.height / image.rows),
-            std::fabs(1.0 * size.width / image.cols)
-        ),
-        1.0
-    );
-
-    cv::Mat resized = image;
-    cv::resize(
-        image,
-        resized,
-        cv::Size(
-            std::round(image.cols * scale_ratio),
-            std::round(image.rows * scale_ratio)
-        ),
-        0., 0., cv::INTER_AREA);
-
-    if ((resized.cols != size.width) xor (resized.rows != size.height)) {
-        int crop_x = size.width > 0 ? std::round((resized.cols-size.width)/2) : resized.cols;
-        int crop_y = size.height > 0 ? std::round((resized.rows-size.height)/2) : resized.rows;
-        
-        int roi_width = size.width > 0 ? size.width : resized.cols;
-        int roi_height = size.height > 0 ? size.height : resized.rows;
-
-        cv::Rect roi(crop_x, crop_y, roi_width, roi_height);
-        cv::Mat cropped = resized(roi);
-
-        return cropped;
-    } else if ((resized.cols != size.width) && (resized.rows != size.height)) {
-        return resized;
-    }
-
-    // auto only
-    return resized;
-}
-
-
-
 const char* CameraNodeInterface::node_name = "camera";
 const char* CameraNodeInterface::ns = "hikcam";
 rclcpp::NodeOptions CameraNodeInterface::options = rclcpp::NodeOptions()
@@ -91,7 +49,7 @@ rclcpp::NodeOptions CameraNodeInterface::options = rclcpp::NodeOptions()
     .automatically_declare_parameters_from_overrides(true);
 
 CameraNodeInterface::CameraNodeInterface()
-    : Node(node_name, ns, options), logger(get_logger())
+    : Node(node_name, ns, options), logger(get_logger()), pool(2)
 {
     camera_pub = std::make_shared<image_transport::CameraPublisher>(
         image_transport::create_camera_publisher(
@@ -144,41 +102,61 @@ CameraNodeInterface::CameraNodeInterface()
     
 }
 
-void CameraNodeInterface::publish(const cv::Mat& image)
+CameraNodeInterface::~CameraNodeInterface() { 
+    pool.join();
+}
+
+void CameraNodeInterface::publish(cv::Mat image)
 {
-    auto pixel_width = get_parameter_or<int>("pixel_width", -1);
-    auto pixel_height = get_parameter_or<int>("pixel_height", -1);
+    boost::asio::post(pool, [this, image = std::move(image)] mutable {
+        auto width = get_parameter_or<int>("width", -1);
+        auto height = get_parameter_or<int>("height", -1);
 
-    cv::Mat roi{};
-    try {
-        roi = shrink_resize_crop(image, cv::Size(pixel_width, pixel_height));
-    } catch (...) {
-        roi = image;
-        RCLCPP_ERROR_STREAM_THROTTLE(
-            logger,
-            *get_clock(),
-            1e4,
-            "Invalid image size, using raw image."
+        /// NOTE: If got negative size, this can also work.
+        double scale_ratio = std::max(1.0 * width / image.cols, 1.0 * height / image.rows);
+        if (scale_ratio > 0) {
+            cv::Rect roi(
+                width > 0 ? std::round((image.cols-width/scale_ratio)/2) : 0,
+                height > 0 ? std::round((image.rows-height/scale_ratio)/2) : 0,
+                width > 0 ? width/scale_ratio : image.cols,
+                height > 0 ? height/scale_ratio: image.rows
+            );
+
+            image = image(roi);
+
+            cv::resize(
+                image,
+                image,
+                cv::Size(
+                    std::round(image.cols * scale_ratio),
+                    std::round(image.rows * scale_ratio)
+                ),
+                0., 0., cv::INTER_LINEAR);
+        }
+
+        if (not image.isContinuous()) {
+            image = image.clone();
+        }
+
+
+        auto cinfo = cinfo_manager->getCameraInfo();
+        auto cimage = sensor_msgs::msg::Image()
+            .set__header(cinfo.header)
+            .set__height(image.rows)
+            .set__width(image.cols)
+            .set__encoding(deduce_encoding(image))
+            .set__step(image.cols * image.elemSize())
+            .set__is_bigendian(false);
+
+        /// NOTE: using copy assignment can decline copy time from 2ms to 0.3ms
+        cimage.data.assign(image.data, image.data + image.cols * image.elemSize() * image.rows);
+
+        camera_pub->publish(
+            std::make_unique<sensor_msgs::msg::Image>(std::move(cimage)),
+            std::make_unique<sensor_msgs::msg::CameraInfo>(std::move(cinfo)),
+            now()
         );
-    }
-
-    auto cinfo = cinfo_manager->getCameraInfo();
-    auto cimage = sensor_msgs::msg::Image()
-        .set__header(cinfo.header)
-        .set__height(roi.rows)
-        .set__width(roi.cols)
-        .set__encoding(deduce_encoding(roi))
-        .set__step(roi.step)
-        .set__is_bigendian(false);
-
-    /// NOTE: using copy assignment can decline copy time from 2ms to 0.3ms
-    cimage.data = std::vector<unsigned char>(roi.datastart, roi.dataend);
-
-    camera_pub->publish(
-        std::make_unique<sensor_msgs::msg::Image>(std::move(cimage)),
-        std::make_unique<sensor_msgs::msg::CameraInfo>(std::move(cinfo)),
-        now()
-    );
+    });
 }
 
 rcl_interfaces::msg::SetParametersResult CameraNodeInterface::dynamic_reconfigure([[maybe_unused]] const std::vector<rclcpp::Parameter> &parameters)

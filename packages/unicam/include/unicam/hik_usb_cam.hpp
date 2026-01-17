@@ -13,7 +13,7 @@
 class HikVisionUsbCam : public CameraNodeInterface {
 public:
     HikVisionUsbCam();
-    ~HikVisionUsbCam() override final;
+    ~HikVisionUsbCam();
 
     /**
      * @brief Return whether the Hikrobot handle reports a live connection.

@@ -1,10 +1,9 @@
+import time
 from imagepipe.runtime.models import Yolov10PoseModel
 
 import torch
 import openvino as ov
 from PIL import Image
-
-from copy import deepcopy
 
 def main():
     model = Yolov10PoseModel.from_pretrained("yolo/v10", use_safetensors=False, dtype=torch.float32).export()
@@ -29,17 +28,22 @@ def main():
 
     pixel_values = pixel_values.cpu().numpy()
 
-    # while True:
-    # with torch.inference_mode():
-    print("start inference!")
-    # print(pixel_values.shape)
-    prediction = ov_model([pixel_values])[ov_model.output(0)]
-    # print(type(prediction))
-    print("Done!")
-    
-    results = model.postprocess(prediction)
+    cnt = 0
 
-    print(results)
+    start_time = time.time()
+    
+    while True:
+    # with torch.inference_mode():
+    # print("start inference!")
+    # print(pixel_values.shape)
+        cnt += 1
+        prediction = ov_model([pixel_values])[ov_model.output(0)]
+    # print(type(prediction))
+    # print("Done!")
+    
+        results = model.postprocess(prediction)
+        stop_time = time.time()
+        print(cnt / (stop_time-start_time))
     # [tensor([[358.8298, 109.3541, 458.2892, 134.8625,   0.9406,   4.0000, 358.7072,
         #  111.8455, 358.8260, 134.6084, 457.5612, 132.9225, 457.8420, 109.5807]])]
     # [[408.5595     122.10835     99.45932     25.5084       0.94064856

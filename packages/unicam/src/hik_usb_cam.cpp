@@ -30,6 +30,8 @@ HikVisionUsbCam::HikVisionUsbCam()
         device_id = 0;
     }
 
+    
+
 }
 
 bool HikVisionUsbCam::is_alive() {
@@ -68,11 +70,14 @@ void HikVisionUsbCam::run() {
     MV_CC_SetGainMode(handle, MV_GAIN_MODE_CONTINUOUS);
     MV_CC_SetGammaSelector(handle, MV_GAMMA_SELECTOR_USER);
     MV_CC_SetBoolValue(handle, "GammaEnable", true);
+    MV_CC_SetExposureTime(handle, get_parameter("exposure_time").as_double());
+    MV_CC_SetGamma(handle, get_parameter("gamma").as_double());
 
-    auto exposure_time = get_parameter("exposure_time").as_double();
-    MV_CC_SetExposureTime(handle, exposure_time);
-    auto gamma = get_parameter("gamma").as_double();
-    MV_CC_SetGamma(handle, gamma);
+
+
+    if (not is_alive()) {
+        throw std::runtime_error("Device is captured by other process");
+    }
 
     MV_CC_StartGrabbing(handle);
 
@@ -138,6 +143,6 @@ void HikVisionUsbCam::image_callback(unsigned char *pData, MV_FRAME_OUT_INFO_EX 
 
     MV_CC_ConvertPixelTypeEx(self->handle, &pixel_convert_param);
 
-    self->publish(image);
+    self->publish(std::move(image));
 
 }
