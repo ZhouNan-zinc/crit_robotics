@@ -1,6 +1,7 @@
 """Common ROS 2 node interfaces for detector."""
 
 import os
+from functools import partial
 from abc import abstractmethod, ABC
 
 import cv2
@@ -124,18 +125,18 @@ class DetectorNodeInterface(Node, ABC):
             automatically_declare_parameters_from_overrides=True
         )
 
-        it = ImageTransport(
-            node_name=self.node_name,
-            image_transport="raw"
-        )
-        
         self.image_subs = [
-            it.subscribe_camera(base_topic=f"{topic_prefix}/image_raw",
-                                queue_size=10,
-                                callback=self.callback) 
+            self.create_subscription(Image, f"{topic_prefix}/image_raw", partial(self.callback, topic_name=topic_prefix), 10)
             for topic_prefix in self.get_parameter("subscriptions").value
         ]
-    
+
+        self.camera_info_subs = [
+            self.create_subscription(CameraInfo, f"{topic_prefix}/camera_info", partial(self.camera_info_callback, topic_name=topic_prefix), 10)
+            for topic_prefix in self.get_parameter("subscriptions").value
+        ]
+
+        self.camera_infos = {topic_prefix: None for topic_prefix in  self.get_parameter("subscriptions").value}
+
     @property
     def logger(self) -> RcutilsLogger:
         return self.get_logger()
@@ -143,6 +144,14 @@ class DetectorNodeInterface(Node, ABC):
     @abstractmethod
     def callback(*args, **kwargs):
         raise NotImplementedError()
+    
+    def get_camera_info(self, topic_name:str):
+        return self.camera_infos.get(topic_name, None)
+
+    def camera_info_callback(self, camera_info:CameraInfo, topic_name:str|None=None):
+        if topic_name is None:
+            raise ValueError("Invalid topic name.")
+        self.camera_infos[topic_name] = camera_info
 
 class YoloPoseDetector(DetectorNodeInterface):
     """"""
@@ -184,9 +193,10 @@ class YoloPoseDetector(DetectorNodeInterface):
         # if os.path.exists(os.path.join(get_package_share_directory("imagepipe"), model_name_or_path)):
         #     model_name_or_path = os.path.join(get_package_share_directory("imagepipe"), model_name_or_path)
 
-    def callback(self, cimage:Image, cinfo:CameraInfo):
+    def callback(self, cimage:Image, topic_name:str|None=None):
         """Convert incoming image/camera info into detection messages."""
         image = cimage_to_cv2_bgr(cimage)
+        camera_info = self.get_camera_info(topic_name)
 
         pixel_values = self.model.preprocess(image)
         
@@ -194,9 +204,9 @@ class YoloPoseDetector(DetectorNodeInterface):
 
         predictions = self.model.postprocess(outputs)
 
-        poses = self.estimate_poses_from_predictions(predictions, cinfo)
+        poses = self.estimate_poses_from_predictions(predictions, camera_info)
 
-        self.publish_message_from_prediction(cinfo.header, predictions, poses)
+        self.publish_message_from_prediction(cimage.header, predictions, poses)
 
     def estimate_poses_from_predictions(
         self,
