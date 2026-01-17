@@ -31,6 +31,7 @@ public:
         FRAME_RATE_MODE,    // 帧率模式：每次detection_callback直接发送
         HIGH_FREQ_MODE      // 高频模式：启动高频回调发送插值点
     }publish_mode_;
+<<<<<<< HEAD
 
     struct Imu{
         double current_yaw = 0.0;
@@ -39,11 +40,20 @@ public:
     struct Detection {
         Eigen::Vector3d position;
         Eigen::Vector3d orientation; 
+=======
+    
+    struct Detection {
+        Eigen::Vector3d position;  
+>>>>>>> e7739be (feat: ros predictor node)
         int armor_class_id;         
         //double confidence;      
         int armor_idx;
         //cv::Rect rect;          
+<<<<<<< HEAD
         double yaw = 0.0;    
+=======
+        double yaw = 0.0;        
+>>>>>>> e7739be (feat: ros predictor node)
         double area_2d = 0.0;      
         double dis_2d = 0.0;   
         double dis_to_heart = 0.0;
@@ -58,7 +68,11 @@ public:
     struct ArmorTracker {
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
         
+<<<<<<< HEAD
         //bool is_valid = true;
+=======
+        bool is_valid = true;
+>>>>>>> e7739be (feat: ros predictor node)
         bool is_active = true;
         int tracker_idx;
         int armor_class_id;
@@ -105,6 +119,7 @@ public:
     // 敌人结构体
     struct Enemy {
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+<<<<<<< HEAD
         int type = -1;
         int enemy_idx = -1;
         int mode = -1;
@@ -113,6 +128,16 @@ public:
         std::vector<int> armor_tracker_ids;
         Eigen::Vector3d center = Eigen::Vector3d::Zero();
         Eigen::Vector3d center_pre = Eigen::Vector3d::Zero();
+=======
+        int type;
+        int enemy_idx;
+        int mode;
+        int best_armor; // 最佳装甲板phase_id for ckf
+        int best_armor_idx;
+        std::vector<int> armor_tracker_ids;
+        Eigen::Vector3d center;
+        Eigen::Vector3d center_pre;
+>>>>>>> e7739be (feat: ros predictor node)
         double radius = 0.28;
         bool radius_cal = false;
         bool is_alive = false;
@@ -128,7 +153,10 @@ public:
         double last_yaw = 0;
         int yaw_round = 0;
         
+<<<<<<< HEAD
         Enemy() = default; 
+=======
+>>>>>>> e7739be (feat: ros predictor node)
         // 构造函数
         Enemy(int enemy_idx, int type, double init_radius = 0.28)
             : enemy_idx(enemy_idx), type(type){
@@ -217,7 +245,10 @@ public:
     Ballistic::BallisticParams create_ballistic_params();
     RmcvId self_id;
     std::vector<int>active_enemies_idx;
+<<<<<<< HEAD
     std::vector<int>active_armor_idx;
+=======
+>>>>>>> e7739be (feat: ros predictor node)
     //YawTrajectoryPlanner yaw_planner;
    
     double timestamp;
@@ -229,6 +260,7 @@ public:
     
     // 可视化相关
     struct VisualizeData {
+<<<<<<< HEAD
         cv::Mat armor_img{};
         cv::Mat camera_matrix{};
         cv::Mat dist_coeffs{};
@@ -239,6 +271,16 @@ public:
         cv::Point2f camera_heart{};
         std::string image_frame;
 
+=======
+        cv::Mat armor_img;
+        cv::Mat camera_matrix;
+        cv::Mat dist_coeffs;
+        cv::Mat camera_rvec;
+        cv::Mat camera_tvec;
+        Eigen::Isometry3d camara_to_odom;
+        Eigen::Vector3d pos_camera;
+        cv::Point2f camera_heart;
+>>>>>>> e7739be (feat: ros predictor node)
     } visualize_;
     std::vector<cv::Point3f> small_object_points = {
         {-0.0675, 0.0275, 0.},
@@ -258,6 +300,10 @@ public:
     
 
     void updateArmorDetection(std::vector<cv::Point3f> object_points,
+<<<<<<< HEAD
+=======
+                              cv::Mat camera_matrix, cv::Mat dist_coeffs,
+>>>>>>> e7739be (feat: ros predictor node)
                               Detection& det);
 
     void ToupdateArmors(const std::vector<Detection>& detections,
@@ -293,6 +339,10 @@ private:
 
     void useGeometricCenterSimple(Enemy& enemy, 
                                 const std::vector<ArmorTracker*>& active_armors);
+<<<<<<< HEAD
+=======
+    void UpdateCameraData(const std::vector<double> k, const std::vector<double> d);
+>>>>>>> e7739be (feat: ros predictor node)
     
     // 角度处理
     double normalize_angle(double angle);
@@ -323,7 +373,10 @@ private:
                          const sensor_msgs::msg::CameraInfo::ConstSharedPtr& camera_info_msg);
     //void HighFrequencyCallback();
 };
+<<<<<<< HEAD
 
+=======
+>>>>>>> e7739be (feat: ros predictor node)
 #include "rclcpp_components/register_node_macro.hpp"
 RCLCPP_COMPONENTS_REGISTER_NODE(EnemyPredictorNode)  // 注册插件
 
