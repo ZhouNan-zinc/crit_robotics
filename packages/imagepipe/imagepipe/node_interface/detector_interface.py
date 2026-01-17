@@ -195,8 +195,11 @@ class YoloPoseDetector(DetectorNodeInterface):
 
     def callback(self, cimage:Image, topic_name:str|None=None):
         """Convert incoming image/camera info into detection messages."""
-        image = cimage_to_cv2_bgr(cimage)
         camera_info = self.get_camera_info(topic_name)
+        if camera_info is None:
+            self.logger.warning(f"Waiting for camera info {topic_name}/camera_info to synchronize...", throttle_duration_sec=1.0, skip_first=True)
+
+        image = cimage_to_cv2_bgr(cimage)
 
         pixel_values = self.model.preprocess(image)
         
