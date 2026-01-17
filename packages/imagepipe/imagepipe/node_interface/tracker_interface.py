@@ -106,11 +106,6 @@ class TrackerNodeInterface(Node, ABC):
             msg.id = str(int(trk.id))
             tracked_detections.append(msg)
 
-        self.logger.warning(f"raw detection num: {len(raw_detections)}, tracker num: {len(trackers)}")
-
-        if len(tracked_detections):
-            self.logger.warning(f"tracking 0: {tracked_detections[0]}, type: {type(tracked_detections[0])}")
-
         self.vision_tracked_pub.publish(Detection2DArray(
             header=msg.header,
             detections=tracked_detections

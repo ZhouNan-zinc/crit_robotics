@@ -1329,8 +1329,7 @@ class Yolov10PoseModel(PreTrainedModel):
         return sum(isinstance(v, bn) for v in self.modules()) < thresh  # True if < 'thresh' BatchNorm layers in model
 
     def preprocess(self, image: Image|np.ndarray):
-        return F.center_crop(F.resize(F.to_dtype(F.to_image(image), dtype=self.dtype, scale=True
-                          ), 640), [640,640]).unsqueeze(0).to(self.device).to(self.dtype)  # [1,3,H,W] float32 0~1
+        return F.to_dtype(F.to_image(image), dtype=self.dtype, scale=True).unsqueeze(0).to(self.device).to(self.dtype)  # [1,3,H,W] float32 0~1
 
     def postprocess(self, prediction: tuple[torch.Tensor|np.ndarray, torch.Tensor|np.ndarray]|torch.Tensor|np.ndarray) -> np.ndarray:
         if isinstance(prediction, tuple):
