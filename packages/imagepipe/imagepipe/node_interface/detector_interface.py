@@ -1,6 +1,7 @@
 """Common ROS 2 node interfaces for detector."""
 
 import os
+import time
 from functools import partial
 from abc import abstractmethod, ABC
 
@@ -197,13 +198,13 @@ class YoloPoseDetector(DetectorNodeInterface):
         """Convert incoming image/camera info into detection messages."""
         camera_info = self.get_camera_info(topic_name)
         if camera_info is None:
-            self.logger.warning(f"Waiting for camera info {topic_name}/camera_info to synchronize...", throttle_duration_sec=1.0, skip_first=True)
+            self.logger.warning(f"Waiting for camera info {topic_name}/camera_info to synchronize", throttle_duration_sec=1.0, skip_first=True)
             return
 
         image = cimage_to_cv2_bgr(cimage)
 
         pixel_values = self.model.preprocess(image)
-        
+
         outputs = self.ov_model([pixel_values.cpu().numpy()])[self.ov_model.output(0)]
 
         predictions = self.model.postprocess(outputs)
