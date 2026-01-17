@@ -154,12 +154,15 @@ class YoloPoseDetector(DetectorNodeInterface):
             use_safetensors=False,
             weights_only=True,
             dtype=torch.float32
-        )
+        ).export()
 
         dummy_inputs = torch.randn((1, 3, 640, 640)).to(
             self.model.device).to(self.model.dtype)
+        
+        for _ in range(2):
+            self.model(dummy_inputs) # dry run
 
-        intermediate_model = ov.convert_model(self.model, example_input=dummy_inputs, verbose=True)
+        intermediate_model = ov.convert_model(self.model, input=[dummy_inputs.shape] ,example_input=dummy_inputs)
         
         self.ov_model = ov.compile_model(intermediate_model, device_name="AUTO")
 
@@ -187,11 +190,9 @@ class YoloPoseDetector(DetectorNodeInterface):
 
         pixel_values = self.model.preprocess(image)
         
-        inputs = [pixel_values.cpu().numpy()]
-        
-        outputs = self.ov_model(inputs)
+        outputs = self.ov_model([pixel_values.cpu().numpy()])[self.ov_model.output(0)]
 
-        predictions = self.model.postprocess(next(iter(outputs.values())))
+        predictions = self.model.postprocess(outputs)
 
         poses = self.estimate_poses_from_predictions(predictions, cinfo)
 
