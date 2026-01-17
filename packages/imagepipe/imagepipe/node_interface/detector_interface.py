@@ -198,6 +198,7 @@ class YoloPoseDetector(DetectorNodeInterface):
         camera_info = self.get_camera_info(topic_name)
         if camera_info is None:
             self.logger.warning(f"Waiting for camera info {topic_name}/camera_info to synchronize...", throttle_duration_sec=1.0, skip_first=True)
+            return
 
         image = cimage_to_cv2_bgr(cimage)
 
