@@ -920,7 +920,7 @@ class Pose(Detect):
         decoded_one2one_kpt = self.kpts_decode(one2one_kpt)
 
         preds = self.postprocess(torch.cat((decoded_one2one, decoded_one2one_kpt), dim=1).permute(0, 2, 1), max_det=self.max_det, nc=self.nc, kpt_shape=self.kpt_shape) # torch.Size([bs, max_det, 4+1+1+nk]), like torch.Size(128, 300, 4+1+1+17*3)
-        return preds if self.export else preds, {"one2many": (one2many, one2many_kpt), "one2one": (one2one, one2one_kpt)}
+        return preds if self.export else (preds, {"one2many": (one2many, one2many_kpt), "one2one": (one2one, one2one_kpt)})
 
     def kpts_decode(self, kpts: torch.Tensor) -> torch.Tensor:
         """Decode keypoints from predictions."""
@@ -1282,6 +1282,16 @@ class Yolov10PoseModel(PreTrainedModel):
 
         m.bias_init()  # only run once
         return self.stride
+    
+    def export(self, mode=True):
+        for m in self.model.modules():
+            if isinstance(m, Detect):  # includes all Detect subclasses like Segment, Pose, OBB
+                m.export = mode
+            elif isinstance(m, C2f):
+                # EdgeTPU does not support FlexSplitV while split provides cleaner ONNX graph
+                m.forward = m.forward_split
+
+        return self
 
     def fuse(self):
         """
