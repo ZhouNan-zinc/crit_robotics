@@ -63,7 +63,6 @@
         
 #         for ch in channels:
 #             if ch["direction"] == "publisher":
-#                 self.create_
 #                 self.create_publisher(
 #                     ch["type"],
 #                     ch["topic"],
@@ -79,7 +78,7 @@
 #             else:
 #                 raise ValueError("key `direction` must be `publisher` or `subscription`")
     
-#     def generate_message(self, data, msg):
+#     def generate_message(self, data):
 #         from rosidl_runtime_py.utilities import get_message
 #         publisher = self.get_publisher(topic_name)
         
@@ -111,11 +110,15 @@
 #     def generate_datapack(self, msg:Imu):
 #         data = []
 #         for m in [getattr(msg, field) for field in msg.get_fields_and_field_types().keys()]:
-#             if isinstance(m.)
+#             if isinstance(m, BasicType):
+#                 data.append(m)
+#             else:
+#                 data.extend()
+#         return data
 
 #     def _generate_datapack_impl(self, msg):
 #         fmt = ""
-#         content = []
+#         data = []
 
 #         for slot, slot_type in zip(msg.get_fields_and_field_types().keys(), msg.SLOT_TYPES):
 #             if isinstance(slot_type, BasicType):
@@ -143,7 +146,7 @@
 #         return fmt, content
 
 
-#     def parse_datapack(self, data):
+#     def generate_message(self, data):
 #         header_format = self.get_parameter_or("header_format", "HBBH")
 #         header_size = struct.calcsize(header_format)
 
@@ -153,14 +156,8 @@
             
 #         magic_number, version, sequence_number, timestamp, message_id = struct.unpack_from(
 #             header_format,
-#             data,
-#             0
-#         )
-
-#         data = struct.unpack_from(
-#             self.get_message_format(message_id),
-#             data,
-#             header_size
+#             buffer=data,
+#             offset=0
 #         )
 
 #         if version != self.version:
@@ -171,18 +168,17 @@
 #             self.logger.error("Datapack transfer error: magic number mismatch.")
 #             return
         
+#         data = struct.unpack_from(
+#             self.get_message_format(self.get_topic_name(message_id)),
+#             buffer=data,
+#             offset=header_size
+#         )
+
 #         # TODO: check sequence number, calculate loss pack rate
 
 #         # TODO: check timestamp, calculate transfer delay
 
 #         self.generate_message(data, self.get_topic_name(message_id))
-
-
-
-
-
-#     def parse_message(self, msg):
-#         pass
 
 
 #     def get_topic_name(self, message_id):
@@ -191,8 +187,8 @@
 #     def get_publisher(self, topic_name) -> Publisher:
 #         pass
 
-#     def get_
-
+#     def get_message_format(self, topic_name:str):
+#         message = 
 
 # class UdpSocket:
 #     """Basic UDP socket using threads for receive and callback dispatch."""

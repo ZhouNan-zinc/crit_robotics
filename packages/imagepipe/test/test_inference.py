@@ -3,6 +3,7 @@ from imagepipe.runtime.models import Yolov10PoseModel
 
 import torch
 import openvino as ov
+import cv2
 from PIL import Image
 
 def main():
@@ -14,19 +15,29 @@ def main():
     for _ in range(2):
         model(dummy_inputs) # dry run
 
-    intermediate_model = ov.convert_model(model, input=[dummy_inputs.shape] ,example_input=dummy_inputs)
-        
-    ov_model = ov.compile_model(intermediate_model, device_name="AUTO")
     
+    core = ov.Core()
 
+    intermediate_model = ov.convert_model(model, input=[dummy_inputs.shape] ,example_input=dummy_inputs)
+
+    ppp = ov.preprocess.PrePostProcessor(intermediate_model)
+    ppp.input().tensor().set_element_type(ov.Type.u8).set_layout(
+        ov.Layout("NHWC")).set_color_format(ov.preprocess.ColorFormat.BGR)
+    ppp.input().model().set_layout(ov.Layout("NCHW"))
+    ppp.input().preprocess().convert_color(ov.preprocess.ColorFormat.RGB).convert_element_type(
+        ov.Type.f32).resize(ov.preprocess.ResizeAlgorithm.RESIZE_LINEAR).scale(255.0)
+    intermediate_model = ppp.build()
+
+    ov_model = core.compile_model(intermediate_model, device_name="AUTO")
+    
     # torchscript_model = torch.compile(model)
 
 
-    im = Image.open("assets/example.jpg").convert("RGB")
+    im = cv2.imread("assets/example.jpg")
+    im = im[None, :]
+    # pixel_values = model.preprocess(im)
 
-    pixel_values = model.preprocess(im)
-
-    pixel_values = pixel_values.cpu().numpy()
+    # pixel_values = pixel_values.cpu().numpy()
 
     cnt = 0
 
@@ -37,12 +48,13 @@ def main():
     # print("start inference!")
     # print(pixel_values.shape)
         cnt += 1
-        prediction = ov_model([pixel_values])[ov_model.output(0)]
+        prediction = ov_model([im])[ov_model.output(0)]
     # print(type(prediction))
     # print("Done!")
     
         results = model.postprocess(prediction)
         stop_time = time.time()
+        print(results)
         print(cnt / (stop_time-start_time))
     # [tensor([[358.8298, 109.3541, 458.2892, 134.8625,   0.9406,   4.0000, 358.7072,
         #  111.8455, 358.8260, 134.6084, 457.5612, 132.9225, 457.8420, 109.5807]])]
