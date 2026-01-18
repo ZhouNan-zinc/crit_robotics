@@ -1,3 +1,4 @@
+import os
 import time
 from imagepipe.runtime.models import Yolov10PoseModel
 
@@ -17,7 +18,10 @@ def main():
 
     
     core = ov.Core()
-
+    core.set_property({
+        "CACHE_DIR": os.path.expanduser("~/.cache/openvino"),
+         "PERFORMANCE_HINT": "LATENCY",
+    })
     intermediate_model = ov.convert_model(model, input=[dummy_inputs.shape] ,example_input=dummy_inputs)
 
     ppp = ov.preprocess.PrePostProcessor(intermediate_model)

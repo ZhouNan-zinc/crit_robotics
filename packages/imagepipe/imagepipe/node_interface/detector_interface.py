@@ -173,7 +173,22 @@ class YoloPoseDetector(DetectorNodeInterface):
             self.model(dummy_inputs) # dry run
 
         intermediate_model = ov.convert_model(self.model, input=[dummy_inputs.shape] ,example_input=dummy_inputs)
+
+        core = ov.Core()
+        core.set_property({
+            "CACHE_DIR": os.path.expanduser("~/.cache/openvino"),
+            "PERFORMANCE_HINT": "LATENCY",
+        })
+
+        ppp = ov.preprocess.PrePostProcessor(intermediate_model)
+        ppp.input().tensor().set_element_type(ov.Type.u8).set_layout(
+            ov.Layout("NHWC")).set_color_format(ov.preprocess.ColorFormat.BGR)
+        ppp.input().model().set_layout(ov.Layout("NCHW"))
+        ppp.input().preprocess().convert_color(ov.preprocess.ColorFormat.RGB).convert_element_type(
+            ov.Type.f32).resize(ov.preprocess.ResizeAlgorithm.RESIZE_LINEAR).scale(255.0)
         
+        intermediate_model = ppp.build()
+
         self.ov_model = ov.compile_model(intermediate_model, device_name="AUTO")
 
         super().__init__()
@@ -201,11 +216,9 @@ class YoloPoseDetector(DetectorNodeInterface):
             self.logger.warning(f"Waiting for camera info {topic_name}/camera_info to synchronize", throttle_duration_sec=1.0, skip_first=True)
             return
 
-        image = cimage_to_cv2_bgr(cimage)
+        pixel_values = cimage_to_cv2_bgr(cimage)
 
-        pixel_values = self.model.preprocess(image)
-
-        outputs = self.ov_model([pixel_values.cpu().numpy()])[self.ov_model.output(0)]
+        outputs = self.ov_model([pixel_values])[self.ov_model.output(0)]
 
         predictions = self.model.postprocess(outputs)
 
