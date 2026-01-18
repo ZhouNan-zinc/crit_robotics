@@ -216,7 +216,7 @@ class YoloPoseDetector(DetectorNodeInterface):
             self.logger.warning(f"Waiting for camera info {topic_name}/camera_info to synchronize", throttle_duration_sec=1.0, skip_first=True)
             return
 
-        pixel_values = cimage_to_cv2_bgr(cimage)
+        pixel_values = cimage_to_cv2_bgr(cimage)[None, :]
 
         outputs = self.ov_model([pixel_values])[self.ov_model.output(0)]
 
