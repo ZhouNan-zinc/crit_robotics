@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from typing import Optional, Sequence, Tuple
 
-
+# HACK: This is not a simplified version. For RoboMaster only.
 def pose_estimate(keypoints: np.ndarray,
                   object_points: np.ndarray,
                   camera_matrix: np.ndarray,
@@ -38,19 +38,24 @@ def pose_estimate(keypoints: np.ndarray,
     z = tvec[2]
 
     R, _ = cv2.Rodrigues(rvec)
+
+    cosphi = np.cos(np.pi/180.0*15.0)
+    cosphitheta = np.clip((R @ np.array(0., 0., 1.))[2], -1.0, 1.0)
+    costheta = cosphitheta / cosphi
+
     sy = np.sqrt(R[0, 0]**2 + R[1, 0]**2) # roll, pitch, yaw (around X, Y, Z)
     singular = sy < 1e-6
 
     if not singular:
-        r  = np.arctan2(R[2, 1], R[2, 2])
-        p = np.arctan2(-R[2, 0], sy)
-        y   = np.arctan2(R[1, 0], R[0, 0])
+        roll = np.arctan2(-R[0, 1], R[0, 0])
+        pitch = np.arccos(cosphi)
+        yaw = np.arccos(costheta)
     else:
         # Gimbal lock
-        r  = np.arctan2(-R[1, 2], R[1, 1])
-        p = np.arctan2(-R[2, 0], sy)
-        y   = 0.0
+        roll = np.arctan2(-R[0, 1], R[0, 0])
+        pitch = np.arccos(cosphi)
+        yaw   = 0.0
 
     position = np.array([x, y, z])
-    orientation = np.array([r, p, y])
+    orientation = np.array([roll, pitch, yaw])
     return position, orientation
