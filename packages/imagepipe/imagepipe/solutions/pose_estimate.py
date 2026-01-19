@@ -27,9 +27,9 @@ def pose_estimate(keypoints: np.ndarray,
         if not is_success:
             raise RuntimeError("Solve PNP failed")
 
-    except RuntimeError:
+    except:
         return None, None
-
+    
     rvec = rvec.reshape(3)
     tvec = tvec.reshape(3)
 
@@ -40,7 +40,7 @@ def pose_estimate(keypoints: np.ndarray,
     R, _ = cv2.Rodrigues(rvec)
 
     cosphi = np.cos(np.pi/180.0*15.0)
-    cosphitheta = np.clip((R @ np.array(0., 0., 1.))[2], -1.0, 1.0)
+    cosphitheta = np.clip((R @ np.array([0., 0., 1.]))[2], -1.0, 1.0)
     costheta = cosphitheta / cosphi
 
     sy = np.sqrt(R[0, 0]**2 + R[1, 0]**2) # roll, pitch, yaw (around X, Y, Z)
