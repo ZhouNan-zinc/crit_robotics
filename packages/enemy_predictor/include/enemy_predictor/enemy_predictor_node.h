@@ -128,10 +128,7 @@ public:
         double last_yaw = 0;
         int yaw_round = 0;
         
-<<<<<<< HEAD
         Enemy() = default; 
-=======
->>>>>>> e7739be (feat: ros predictor node)
         // 构造函数
         Enemy(int enemy_idx, int type, double init_radius = 0.28)
             : enemy_idx(enemy_idx), type(type){
@@ -220,10 +217,7 @@ public:
     Ballistic::BallisticParams create_ballistic_params();
     RmcvId self_id;
     std::vector<int>active_enemies_idx;
-<<<<<<< HEAD
     std::vector<int>active_armor_idx;
-=======
->>>>>>> e7739be (feat: ros predictor node)
     //YawTrajectoryPlanner yaw_planner;
    
     double timestamp;
