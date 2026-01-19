@@ -1,0 +1,248 @@
+/hik_camera:
+  ros__parameters:
+    camera_name: hkcam #同时也是Image消息名
+    robot_name: rm_robot
+    sn: "00G18308325" # shortfocal
+    enable_imshow: false
+    exposure_time: 2500.0
+    gain: 16.0
+    digital_shift: 5.0
+    offset_x: -1
+    offset_y: -1
+    out_post_top_offset_y: 440
+    grab_height: 1080
+    grab_width: 1440
+    en_exposure_time: 2500.0
+    en_gain: 5.0
+    en_digital_shift: 5.0
+    en_offset_x: -1
+    en_offset_y: -1
+    en_grab_height: 1024
+    en_grab_width: 1024
+    frame_rate: 150.0
+
+/recorder_node:
+  ros__parameters:
+    hik_camera_image_topic: hkcam
+    detect_image_topic: detect_record
+    video_save_path: /home/ubuntu/video_record
+    max_height: 1080
+    max_width: 1440
+    
+/rm_republish:
+  ros__parameters:
+    camera_name: hkcam
+    use_sensor_data_qos: true
+
+/rm_serial_driver:
+  ros__parameters:
+    device_name: /dev/ttyUSB0
+    baud_rate: 2000000
+    timestamp_offset: 0.0
+    robot_name: "rm_robot"
+
+/simple_serial_driver:
+  ros__parameters:
+    device_name: /dev/ttyUSB0
+    baud_rate: 2000000
+    timestamp_offset: 0.0
+    robot_name: "rm_robot"
+    
+/rm_detector:
+  ros__parameters:
+    gamma: 0.5
+    camera_name: hkcam
+    robot_name: rm_robot
+    armor_detector_config: "models/v5.1.toml"
+    armor_detector_trad_config: "models/trad.toml"
+    energy_detector_config: "models/v8_wind.toml"
+    enable_imshow: true
+    debug: false
+    record_topic: detect_record
+
+/enemy_predictor:
+  ros__parameters:
+    detection_name: detection_enemy
+    robot_name: rm_robot
+    enable_record_pnp_result: false
+    enable_imshow: false
+    debug: false
+    camera_name: "hkcam"
+    target_frame: "odom"
+    found_params: true
+    # armor_ekf
+    armor_ekf.P: [1.0,1.0,1.0,1.0,1.0,1.0]
+    armor_ekf.Q: [0.00000025, 0.00000049, 0.000001, 0.01, 0.01, 0.01]
+    armor_ekf.R: [0.00016, 0.00049, 0.0025]
+    armor_ekf.Ke: [1.0, 0.8, 0.8]
+    armor_ekf.filter_length: 10
+
+    armor_stf.pho: 0.95
+    armor_stf.beta: 1.3
+
+    # yaw_kf
+    yaw_ekf.P: [1.0,1.0]
+    yaw_ekf.Q: 1.0
+    yaw_ekf.R: [0.0029]
+
+    # enemy_kf
+    enemy_ckf.P: [1.0,1.0,1.0,1.0,1.0,1.0]
+    enemy_ckf.R_XYZ: 0.0025
+    enemy_ckf.R_YAW: 0.029
+    enemy_ckf.Q2_XY: 0.5
+    enemy_ckf.Q2_YAW: 0.5
+    
+    use_z_predictor: false               #是否使用z预测器
+    
+    # 传统方法感知陀螺/前哨站相关参数
+    census_period_min: 5.0
+    census_period_max: 5.0
+    top_pitch_thresh: 10.0         # 判定建筑顶端装甲板的pitch阈值
+    # 装甲目标过滤/选择
+    sight_limit: 15.0                     #过滤距离过远装甲板
+    high_limit: 2.4                       #过滤距离过高过低的装甲板
+    size_limit: 200.0                     #按面积过滤装甲板（太小）
+    bound_limit: 0.0                     #过滤图像边缘的装甲板（单位为像素）
+    aspect_limit_big: 1.6                 #当大装甲板处于40度时宽高比 公式m*sin(40)/n
+    aspect_limit_small: 0.8               #当小装甲板处于40度时宽高比
+    reset_time: 0.52                      #若在视野中消失 reset_time秒，认为目标丢失
+    size_ratio_thresh: 1.8                #切换整车滤波跟踪装甲板的面积阈值/切换选择目标的面积阈值
+    collimation: [320.0,320.0]            #二维图像上的准星
+    # 帧间匹配
+    interframe_dis_thresh: 0.09617        #两帧间装甲板的最大移动距离（用于帧间匹配）
+    id_inertia: 100                       #摩尔投标编号过滤惯性帧数
+    robot_2armor_dis_thresh: 1.0          #同一车上相邻两装甲板最远距离
+    # 运动状态判断
+    rotate_thresh: 2.0                    #进入旋转状态阈值
+    rotate_exit: 1.0                      #退出旋转状态阈值
+    high_spd_rotate_thresh: 3.0           #进入高速旋转状态阈值
+    high_spd_rotate_exit: 2.0             #退出高速旋转状态阈值
+    move_thresh: 2.0                      #进入移动状态阈值(目前移动小陀螺判断)
+    move_exit: 0.5                        #退出移动状态阈值
+    # 火控参数
+    change_armor_time_thresh: 0.1         #选取新装甲板滞回时间
+    dis_yaw_thresh: 3.0                   #两装甲板相对yaw接近、即分居对称两侧的阈值，以防频繁切换选取装甲板，单位:度
+    gimbal_error_dis_thresh: 0.03         #自动发弹阈值，限制云台误差的球面意义距离
+    pitch_error_dis_thresh: 0.04          #自动发弹阈值，目标上下小陀螺时pitch限制
+    choose_enemy_without_autoaim_signal: false  #在没有收到右键信号的时候也选择目标（调试用）
+    # 延迟参数
+    response_delay: 0.05                  #系统延迟(程序+通信+云台响应)
+    shoot_delay: 0.180                     #发弹延迟
+
+    enemy_radius_cache_reset_time: 45.0
+
+    test_ballistic: false
+
+/outpost_predictor:
+  ros__parameters:
+    detection_name: "detection_outpost"
+    robot_name: rm_robot
+
+    enable_imshow: false
+    debug: false
+    camera_name: "hkcam"
+    target_frame: "odom"
+    found_params: true
+    # armor_kf
+    armor_ekf.P: [1.0,1.0,1.0,1.0,1.0,1.0]
+    armor_ekf.Q: [0.00000025, 0.00000025, 0.000001, 0.01, 0.01, 0.01]
+    armor_ekf.R: [0.00016, 0.00016, 0.0025]
+    armor_ekf.Ke: [1.0, 1.0, 1.0]
+    armor_ekf.filter_length: 10
+    armor_ekf.const_dis: 0.21
+
+    # yaw_kf
+    yaw_ekf.P: [1.0,1.0]
+    yaw_ekf.Q: 1.0   # 旋转装甲板正对PnP精度过差，对于专门瞄中的英雄
+    yaw_ekf.R: [0.0029]
+
+    # center_kf
+    center.Q: 0.0025
+    center.R: 9.0
+    center.P: 10.0
+
+    # outpost_kf
+    P: [10.0,1.0,10.0,1.0,1.0,6.136] # P_omega取(0.4 * 2 * M_PI)^2
+    R_XYZ: 0.0025
+    R_YAW: 0.029
+    Q2_XY: 0.0025
+    # Q2_Z: 0.0025
+    Q2_YAW: 0.025
+    const_dis: 0.2765
+    
+    # 传统方法感知陀螺/前哨站相关参数
+    middle_aim_thresh: 0.3
+    census_period_min: 5.0
+    census_period_max: 5.0
+    anti_outpost_census_period: 10.0
+    anti_outpost_census_period_min: 0.1
+    timestamp_thresh: 0.05                # 反前哨站时间差阈值
+    top_pitch_thresh: 10.0         # 判定建筑顶端装甲板的pitch阈值
+    top_offset_z: 0.3345    # 顶装甲相对于前哨站中心的高度
+    top_offset_dis: 0.095   # 顶装甲相对于前哨站装甲板中心的水平投影距离
+    middle_timestamp_offset: -0.1 # 考虑观测误差带来的拟合过中时机有误差的补偿值
+    # 装甲目标过滤/选择
+    sight_limit: 20.0                     #过滤距离过远装甲板
+    high_limit: 6.0                       #过滤距离过高过低的装甲板
+    size_limit: 200.0                     #按面积过滤装甲板（太小）
+    bound_limit: 30.0                     #过滤图像边缘的装甲板（单位为像素）
+    aspect_limit_big: 1.6                 #当大装甲板处于40度时宽高比 公式m*sin(40)/n
+    aspect_limit_small: 1.2               #当小装甲板处于40度时宽高比
+    rm_pnp_aspect_limit_big: 3.83         #使用约束pnp的宽高比       
+    rm_pnp_aspect_limit_small: 2.37       #使用约束pnp的宽高比        
+    reset_time: 5.2 # 旋转前哨站周期以上                      #若在视野中消失 reset_time秒，认为目标丢失
+    size_ratio_thresh: 1.8                #切换整车滤波跟踪装甲板的面积阈值/切换选择目标的面积阈值
+    collimation: [320.0,320.0]            #二维图像上的准星
+    # 帧间匹配
+    interframe_dis_thresh: 0.04617        #两帧间装甲板的最大移动距离（用于帧间匹配）
+    id_inertia: 100                       #摩尔投标编号过滤惯性帧数
+    robot_2armor_dis_thresh: 1.0          #同一车上相邻两装甲板最远距离
+    # 火控参数
+    change_armor_time_thresh: 0.1
+    midshot_period: 0.02
+    gimbal_error_dis_thresh: 0.12         #自动发弹阈值，限制云台误差的球面意义距离
+    # 延迟参数
+    response_delay: 0.05                  #系统延迟(程序+通信+云台响应)
+    shoot_delay: 0.170                    #发弹延迟
+
+    test_ballistic: false
+    
+/**:
+  ros__parameters:
+    ballistic.params_found: true
+    # 分别五个值分别对应9，15，16，18，30弹速的弹道参数
+    ## aim middle:
+    # ballistic.stored_yaw_offset: [0.0, 0.0, 0.7, 0.0, 0.0]
+    # ballistic.stored_pitch_offset: [0.0, 0.0, -1.1, 0.0, -0.0]
+    ## tracking aim:
+    ballistic.stored_yaw_offset: [0.0, 0.0, 0.33, 0.0, 0.0] # 左+右-
+    ballistic.stored_pitch_offset: [0.0, 0.0,-0.7, 0.0, -0.0] # 上-下+  #
+    # ROS2目前不支持加载二维数组，传入string使用yaml-cpp处理
+    # 分别五个值分别对应9，15，16，18，30弹速的发射装置与相机的偏移量
+    ballistic.stored_cam2gun_offset: "[
+    	[0.0, 0.0, 0.0],
+  	[0.0, 0.0, 0.0],
+  	[0.0, 0.0, 0.0],
+  	[0.0, 0.0, 0.0],
+  	[0.0, 0.0, 0.0]
+    ]" 
+    ballistic.ballistic_refresh: true #每次加载刷新弹道表，上场前关闭
+    ballistic.v9: 8.7
+    ballistic.v15: 14.6
+    ballistic.v16: 15.6
+    ballistic.v18: 16.4
+    ballistic.v30: 28.4
+    #空气阻力
+    ballistic.small_k: 0.002
+    ballistic.big_k: 0.0008
+    ballistic.l: 0.0            #枪长
+    ballistic.theta_l: -45.0    #仰角下界
+    ballistic.theta_r: 45.0     #仰角上界
+    ballistic.theta_d: 0.01     #仰角步长
+    ballistic.x_l: 0.0          #距离下界
+    ballistic.x_r: 15.0         #距离上界
+    ballistic.x_n: 1000         #距离步数
+    ballistic.y_l: -5.0         #高度下界
+    ballistic.y_r: 5.0          #高度上界
+    ballistic.y_n: 1000         #高度步数
+    ballistic.print_params: true
