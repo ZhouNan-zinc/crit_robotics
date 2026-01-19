@@ -18,7 +18,6 @@ from rclpy.qos import (
     QoSDurabilityPolicy,
 )
 from ament_index_python import get_package_share_directory
-from image_transport_py import ImageTransport
 from sensor_msgs.msg import (
     Image,
     CameraInfo
@@ -44,17 +43,12 @@ from ..solutions.pose_estimate import pose_estimate
 
 
 SMALL_ARMOR_POINTS: list[tuple[float, float, float]] = [
-    (1e-6, 6.75e-2, 2.75e-2),
-    (1e-6, -6.75e-2, 2.75e-2),
-    (1e-6, -6.75e-2, -2.75e-2),
-    (1e-6, 6.75e-2, -2.75e-2)
+    (-6.75e-2, -2.75e-2, 1e-6),
+    (-6.75e-2, 2.75e-2, 1e-6),
+    (6.75e-2, 2.75e-2, 1e-6),
+    (6.75e-2, -2.75e-2, 1e-6),
 ]
-BIG_ARMOR_POINTS: list[tuple[float, float, float]] = [
-    (1e-6, 1.15e-1, 2.9e-2),
-    (1e-6, -1.15e-1, 2.9e-2),
-    (1e-6, -1.15e-1, -2.9e-2),
-    (1e-6, 1.15e-1, -2.9e-2)
-]
+BIG_ARMOR_POINTS: list[tuple[float, float, float]] = []
 BASE_POINTS: list[tuple[float, float, float]] = []
 
 CLASS_TO_POINTS = {
@@ -248,7 +242,6 @@ class YoloPoseDetector(DetectorNodeInterface):
 
         camera_matrix = np.array(cinfo.k, dtype=np.float64).reshape(3, 3)
         distortion_coefficients = np.array(cinfo.d, dtype=np.float64)
-        W, H = cinfo.width, cinfo.height
 
         poses = []
 
@@ -256,13 +249,7 @@ class YoloPoseDetector(DetectorNodeInterface):
             if len(pred) < 14:
                 raise ValueError(f"Prediction length {len(pred)} < 14")
 
-            keypoints = np.array(
-                pred[6:14],
-                dtype=np.float64
-            ).reshape(-1, 2)
-
-            keypoints[:, 0] *= W
-            keypoints[:, 1] *= H
+            keypoints = pred[6:14].reshape(-1, 2)
 
             class_id = int(pred[5])
             object_points = np.asarray(CLASS_TO_POINTS.get(class_id, SMALL_ARMOR_POINTS), dtype=np.float32)
