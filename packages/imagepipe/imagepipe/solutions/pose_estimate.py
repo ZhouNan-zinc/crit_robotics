@@ -43,19 +43,12 @@ def pose_estimate(keypoints: np.ndarray,
     cosphitheta = np.clip((R @ np.array([0., 0., 1.]))[2], -1.0, 1.0)
     costheta = cosphitheta / cosphi
 
-    sy = np.sqrt(R[0, 0]**2 + R[1, 0]**2) # roll, pitch, yaw (around X, Y, Z)
-    singular = sy < 1e-6
 
-    if not singular:
-        roll = np.arctan2(-R[0, 1], R[0, 0])
-        pitch = np.arccos(cosphi)
-        yaw = np.arccos(costheta)
-    else:
-        # Gimbal lock
-        roll = np.arctan2(-R[0, 1], R[0, 0])
-        pitch = np.arccos(cosphi)
-        yaw   = 0.0
+    roll = np.arctan2(-R[0, 1], R[0, 0])
+    pitch = np.arccos(cosphi)
+    yaw = np.arctan2(np.clip(R[0,2], -1.0, 1.0), costheta) # np.arctan2(sintheta, costheta)
 
     position = np.array([x, y, z])
     orientation = np.array([roll, pitch, yaw])
+    
     return position, orientation
