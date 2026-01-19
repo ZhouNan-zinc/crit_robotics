@@ -40,7 +40,7 @@ def pose_estimate(keypoints: np.ndarray,
     R, _ = cv2.Rodrigues(rvec)
 
     roll = np.arctan2(-R[0, 1], R[0, 0])
-    pitch = np.deg2rad(15)
+    pitch = np.deg2rad(-15)
     yaw = np.arctan2(np.clip(R[0,2], -1.0, 1.0), np.clip(R[2,2] / np.cos(pitch), -1.0, 1.0)) # np.arctan2(sintheta, costheta)
 
     position = np.array([x, y, z])
