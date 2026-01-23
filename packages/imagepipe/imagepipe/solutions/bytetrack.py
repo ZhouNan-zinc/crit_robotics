@@ -2,6 +2,7 @@ from typing import Any
 
 import cv2
 import numba
+import logging
 import lap
 import numpy as np
 
@@ -407,7 +408,7 @@ class ByteTrack:
             self.trackers[idx].bbox = bbox
             bboxes_for_canvas.append(np.asarray(bbox))
 
-        if bboxes_for_canvas:
+        if len(bboxes_for_canvas):
             max_x = max(int(np.max(bbox[:4:2])) for bbox in bboxes_for_canvas)
             max_y = max(int(np.max(bbox[1:4:2])) for bbox in bboxes_for_canvas)
             width = max(1, max_x + 10)

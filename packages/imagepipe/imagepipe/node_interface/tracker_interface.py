@@ -121,7 +121,7 @@ class MotTracker(TrackerNodeInterface):
         
         self.mot_tracker = ByteTrack(
             min_hits=3,
-            iou_thres=None,
+            iou_thres=0.3,
             conf_thres=0.3
         )
 

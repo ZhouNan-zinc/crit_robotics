@@ -38,7 +38,7 @@ Crit Robotics is organized as a ROS 2 workspace with a set of focused packages. 
 ### imagepipe
 
 - Python ROS 2 node that consumes images and camera info topics.
-- `imagepipe/pipe/ov_end2end_yolo.py` loads OpenVINO compiled models, performs inference, applies `end2end_fastnms`, and feeds detections into a ByteTrack multi-object tracker.
+- `imagepipe/pipe/ov_end2end_yolo.py` loads OpenVINO compiled models, performs inference, applies `non_max_suppresson`, and feeds detections into a ByteTrack multi-object tracker.
 - `imagepipe/node/pose_estimate.py` converts tracker output into `vision_msgs/Detection2DArray` messages, estimating 6-DoF pose via `cv2.solvePnP`.
 - Depends on GPU/CPU OpenVINO runtime (configurable via ROS parameters), `lap` (assignment), and `numba`.
 - Designed to be extended with additional pipelines that inherit from `PosePipelineNodeInterface`.
