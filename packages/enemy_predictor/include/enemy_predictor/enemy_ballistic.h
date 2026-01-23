@@ -69,7 +69,15 @@ public:
     BallisticResult final_ballistic(Eigen::Isometry3d T, Eigen::Vector3d p);
     std::pair<double, double> table_ballistic(const BallisticTable *tar, double x, double y);
 
-using Ptr = std::shared_ptr<Ballistic>;
+    double rad2deg(double rad) { return rad * 180.0 / M_PI; }
+
+    double deg2rad(double deg) { return deg * M_PI / 180.0; }
+
+    bool feq(double a, double b) { 
+        return rad2deg(fabs(a - b)) < 0.1; 
+    }
+
+    using Ptr = std::shared_ptr<Ballistic>;
 
 private:
     double v, yaw_offset, pitch_offset;  // pitch_offset 向下为正  yaw_offset 向左为正
@@ -85,9 +93,6 @@ private:
     BallisticTable Table9, Table15, Table16, Table18, Table30;
     BallisticTable *pTable = nullptr;
     void calculateTable(bool is_big, int v_max);
-    double rad2deg(double rad) { return rad * 180.0 / M_PI; }
-
-    double deg2rad(double deg) { return deg * M_PI / 180.0; }
 };
 
 

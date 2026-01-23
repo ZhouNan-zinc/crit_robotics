@@ -32,8 +32,9 @@ public:
         HIGH_FREQ_MODE      // 高频模式：启动高频回调发送插值点
     }publish_mode_;
 
-    struct Imu{
+    struct ImuData{
         double current_yaw = 0.0;
+        rclcpp::Time timestamp;
     }imu_;
     
     struct Detection {
@@ -47,6 +48,7 @@ public:
         double area_2d = 0.0;      
         double dis_2d = 0.0;   
         double dis_to_heart = 0.0;
+
         Detection() = default;
         
         Detection(const Eigen::Vector3d& pos, int armor_class_id_, int armor_idx_, double y = 0)
@@ -171,7 +173,7 @@ public:
         int target_enemy_id = -1;
         bool right_press = false;
         int cmd_mode; //  0 -> 平动 , 1 -> 小陀螺
-    };
+    }cmd;
     struct EnemyPredictorNodeParams{
         std::string detection_name;
         std::string robot_name;
@@ -202,7 +204,7 @@ public:
     
         double pitch_offset_high_hit_low;  //deg
         double pitch_offset_low_hit_high;  //deg
-    };    
+    }params_;    
 
     // 数据容器
     ArmorTracker armor_tracker;
@@ -210,8 +212,6 @@ public:
     std::vector<Enemy> enemies_;
     std::vector<Detection> current_detections_; 
     //std::unordered_map<int, int> tracker_id_to_index_;
-    Command cmd;
-    EnemyPredictorNodeParams params_;
     Ballistic::BallisticResult ball_res;
     Ballistic bac;
     Ballistic::BallisticParams create_ballistic_params();
@@ -232,8 +232,8 @@ public:
         cv::Mat armor_img{};
         cv::Mat camera_matrix{};
         cv::Mat dist_coeffs{};
-        cv::Mat camera_rvec{};
-        cv::Mat camera_tvec{};
+        cv::Mat camera_rvec = cv::Mat::zeros(3, 1, CV_64F);
+        cv::Mat camera_tvec = cv::Mat::zeros(3, 1, CV_64F);;
         Eigen::Isometry3d camara_to_odom{};
         Eigen::Vector3d pos_camera{};
         cv::Point2f camera_heart{};
@@ -258,18 +258,20 @@ public:
     
 
     void updateArmorDetection(std::vector<cv::Point3f> object_points,
-                              Detection& det);
+                              Detection& det,
+                              rclcpp::Time timestamp_det);
 
     void ToupdateArmors(const std::vector<Detection>& detections,
                      double timestamp);
     
     Eigen::Isometry3d getTrans(const std::string& source_frame, 
-                               const std::string& target_frame);
-    
+                               const std::string& target_frame,
+                               rclcpp::Time timestamp_det);
+    void EnemyManage(double timestamp, rclcpp::Time timestamp_det);
 private:
     // 敌人分配和更新
     int assignToEnemy(ArmorTracker& tracker, double timestamp);
-    void EnemyManage(double timestamp, Command& cmd, EnemyPredictorNodeParams& params_);
+
     void updateSingleEnemy(Enemy& enemy, double timestamp);
     void calculateEnemyCenterAndRadius(Enemy& enemy, double timestamp);
     Eigen::Vector3d FilterManage(Enemy &enemy, double dt, ArmorTracker& tracker);
@@ -284,16 +286,18 @@ private:
                                        const ArmorTracker& armor2);
     //void updateRadiusFilters(Enemy& enemy, const ArmorTracker& armor1,
     //                        const ArmorTracker& armor2, double r1, double r2);
-    std::pair<Ballistic::BallisticResult, Eigen::Vector3d> calc_ballistic_(double delay, Command& cmd, double timestamp, ArmorTracker& tracker, std::function<Eigen::Vector3d(ArmorTracker&, double)> _predict_func);
-    void getCommand(Enemy& enemy, Command& cmd, double timestamp, EnemyPredictorNodeParams& params_);
-    int ChooseMode(Enemy &enemy, double timestamp, Command& cmd);
+    std::pair<Ballistic::BallisticResult, Eigen::Vector3d> calc_ballistic_(double delay, rclcpp::Time timestamp_det, ArmorTracker& tracker, std::function<Eigen::Vector3d(ArmorTracker&, double)> _predict_func);
+    void getCommand(Enemy& enemy, double timestamp, rclcpp::Time timestamp_det);
+    int ChooseMode(Enemy &enemy, double timestamp);
     // tool
     void create_new_tracker(const Detection &detection, double timestamp);
     //ArmorTracker* getActiveArmorTrackerById(int tracker_id);
 
     void useGeometricCenterSimple(Enemy& enemy, 
                                 const std::vector<ArmorTracker*>& active_armors);
-    
+    bool getCurrentYaw(const rclcpp::Time & target_time, double & output_yaw);
+    void cleanOldImuData();
+
     // 角度处理
     double normalize_angle(double angle);
     double angle_difference(double a, double b);
@@ -315,7 +319,14 @@ private:
     rclcpp::TimerBase::SharedPtr high_freq_timer_;    // 高频定时器
     rm_msgs::msg::RmRobot robot;
     sensor_msgs::msg::Image::SharedPtr img_msg; 
-    FrameInfo frame_info;
+    rclcpp::Time time_det;
+    rclcpp::Time time_image;
+
+    std::deque<ImuData> imu_buffer_;
+    // 保护缓冲区的互斥锁
+    std::mutex buffer_mutex_;
+    // 缓存的最大时长（秒），用于清理旧数据
+    double buffer_duration_ = 5.0;
     //Armor armor;
     void detection_callback(const vision_msgs::msg::Detection2DArray::SharedPtr detection_msg);
     void robot_callback(const rm_msgs::msg::RmRobot::SharedPtr robot_msg);

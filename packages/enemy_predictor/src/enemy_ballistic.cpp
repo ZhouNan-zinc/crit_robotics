@@ -20,10 +20,10 @@ Ballistic::BallisticParams Ballistic::declareParamsByNode(rclcpp::Node *node,con
     // params_found为false说明加载失败
     assert(params.params_found && "Cannot found valid ballistic params");
 
-    params.pitch2yaw_t = node->declare_parameter("pitch2yaw_t", std::vector<double>{0., 0.});  // 没读进去就报错
+    params.pitch2yaw_t = node->declare_parameter("pitch2yaw_t", std::vector<double>{0., 0., 0.});  // 没读进去就报错
     assert(params.pitch2yaw_t.size() == 3 && "pitch_to_yaw size must be 3!");
     params.yaw2gun_offset = sqrt(params.pitch2yaw_t[0] * params.pitch2yaw_t[0] + params.pitch2yaw_t[1] * params.pitch2yaw_t[1]);    
-
+    
     params.stored_yaw_offset =
         node->declare_parameter("ballistic.stored_yaw_offset", std::vector<double>({}));
     params.stored_pitch_offset =
@@ -175,7 +175,8 @@ Ballistic::BallisticResult Ballistic::final_ballistic(Eigen::Vector3d p){
     RCLCPP_INFO(rclcpp::get_logger("Ballestic"), "final_ballistic: x:%lf y:%lf", x, y);
     auto [pitch, t] = table_ballistic(
         pTable, sqrt(x * x - params.yaw2gun_offset * params.yaw2gun_offset), y + cam2gun_offset[2]);
-    RCLCPP_INFO(rclcpp::get_logger("Ballestic: t"), "final_ballistic: t:%lf", t);
+  
+    RCLCPP_INFO_STREAM(rclcpp::get_logger("Ballestic: t"), "t: " << t);
     if (t < 0) return BallisticResult();
     double yaw = atan2(p[1], p[0]);
     return BallisticResult(-pitch + deg2rad(pitch_offset),
@@ -186,54 +187,136 @@ Ballistic::BallisticResult Ballistic::final_ballistic(Eigen::Isometry3d T, Eigen
     return final_ballistic(T * p);
 }
 //table_ballistic ------> 改为双线性差值
-std::pair<double, double> Ballistic::table_ballistic(const BallisticTable *tar, double x, double y){
+std::pair<double, double> Ballistic::table_ballistic(const BallisticTable *tar, double x, double y) {
     if (tar == nullptr) {
         RCLCPP_ERROR(rclcpp::get_logger("rm_base"), "You must call refresh_velocity() before using table_ballistic()");
         return std::make_pair(0., -1.);
     }
-   // 1. 计算网格索引
+
+    // 1. 计算网格索引（浮点数）
     double i_float = (x - tar->x_l) / tar->x_d;
     double j_float = (y - tar->y_l) / tar->y_d;
-    
+
+    // 2. 扩展边界检查 - 允许外推
+    // 2.1 如果索引完全超出表格范围，尝试外推
+    if (i_float < 0 && j_float < 0) {
+        // 两个维度都超出下限，使用最接近的点
+        return std::make_pair(tar->sol_theta[0][0], tar->sol_t[0][0]);
+    }
+    if (i_float >= tar->x_n - 1 && j_float >= tar->y_n - 1) {
+        // 两个维度都超出上限，使用最接近的点
+        return std::make_pair(tar->sol_theta[tar->x_n - 1][tar->y_n - 1], 
+                            tar->sol_t[tar->x_n - 1][tar->y_n - 1]);
+    }
+
+    // 3. 边界点处理 - 单维度超出
+    // 3.1 x维度超出，y维度正常
+    if (i_float < 0 || i_float >= tar->x_n - 1) {
+        // 固定y维度进行外推
+        int i_clamp = std::clamp(static_cast<int>(std::round(i_float)), 0, tar->x_n - 1);
+        int j = static_cast<int>(std::clamp(j_float, 0.0, static_cast<double>(tar->y_n - 1)));
+
+        if (i_float < 0) {
+            // 近距离外推：使用最小的两个x点进行线性外推
+            if (tar->x_n >= 2) {
+                double dx_ratio = (x - tar->x_l) / (tar->x_l + tar->x_d - tar->x_l);
+                double theta = tar->sol_theta[0][j] + 
+                             (tar->sol_theta[1][j] - tar->sol_theta[0][j]) * dx_ratio;
+                double t = tar->sol_t[0][j] + 
+                          (tar->sol_t[1][j] - tar->sol_t[0][j]) * dx_ratio;
+                return std::make_pair(std::max(theta, deg2rad(tar->theta_l)), 
+                                    std::max(t, 0.01));
+            }
+        } else {
+            // 远距离外推：使用最大的两个x点进行线性外推
+            if (tar->x_n >= 2) {
+                double dx_ratio = (x - (tar->x_l + (tar->x_n - 2) * tar->x_d)) / tar->x_d;
+                double theta = tar->sol_theta[tar->x_n - 2][j] + 
+                             (tar->sol_theta[tar->x_n - 1][j] - tar->sol_theta[tar->x_n - 2][j]) * dx_ratio;
+                double t = tar->sol_t[tar->x_n - 2][j] + 
+                          (tar->sol_t[tar->x_n - 1][j] - tar->sol_t[tar->x_n - 2][j]) * dx_ratio;
+                return std::make_pair(std::min(theta, deg2rad(tar->theta_r)), t);
+            }
+        }
+        // 如果表格太小，返回最接近的点
+        return std::make_pair(tar->sol_theta[i_clamp][j], tar->sol_t[i_clamp][j]);
+    }
+
+    // 3.2 y维度超出，x维度正常
+    if (j_float < 0 || j_float >= tar->y_n - 1) {
+        // 固定x维度进行外推
+        int i = static_cast<int>(std::clamp(i_float, 0.0, static_cast<double>(tar->x_n - 1)));
+        int j_clamp = std::clamp(static_cast<int>(std::round(j_float)), 0, tar->y_n - 1);
+
+        if (j_float < 0) {
+            // 低高度外推
+            if (tar->y_n >= 2) {
+                double dy_ratio = (y - tar->y_l) / (tar->y_l + tar->y_d - tar->y_l);
+                double theta = tar->sol_theta[i][0] + 
+                             (tar->sol_theta[i][1] - tar->sol_theta[i][0]) * dy_ratio;
+                double t = tar->sol_t[i][0] + 
+                          (tar->sol_t[i][1] - tar->sol_t[i][0]) * dy_ratio;
+                return std::make_pair(std::max(theta, deg2rad(tar->theta_l)), 
+                                    std::max(t, 0.01));
+            }
+        } else {
+            // 高高度外推
+            if (tar->y_n >= 2) {
+                double dy_ratio = (y - (tar->y_l + (tar->y_n - 2) * tar->y_d)) / tar->y_d;
+                double theta = tar->sol_theta[i][tar->y_n - 2] + 
+                             (tar->sol_theta[i][tar->y_n - 1] - tar->sol_theta[i][tar->y_n - 2]) * dy_ratio;
+                double t = tar->sol_t[i][tar->y_n - 2] + 
+                          (tar->sol_t[i][tar->y_n - 1] - tar->sol_t[i][tar->y_n - 2]) * dy_ratio;
+                return std::make_pair(theta, t);
+            }
+        }
+        // 如果表格太小，返回最接近的点
+        return std::make_pair(tar->sol_theta[i][j_clamp], tar->sol_t[i][j_clamp]);
+    }
+
+    // 4. 正常范围内 - 使用双线性插值
     int i = static_cast<int>(i_float);
     int j = static_cast<int>(j_float);
-    
-    // 2. 边界检查（直接拒绝边界外的点）
-    if (i < 0 || i >= tar->x_n - 1 || j < 0 || j >= tar->y_n - 1) {
-        return std::make_pair(0., -1.); 
-    }
-    
-    // 3. 双线性插值
+
     double dx = i_float - i;
     double dy = j_float - j;
+
+    // 双线性插值权重
     double w00 = (1-dx) * (1-dy);
     double w10 = dx * (1-dy);
     double w01 = (1-dx) * dy;
     double w11 = dx * dy;
-    
-    // 4. 获取四个点的值
+
+    // 获取四个点的值
     double theta = 
         tar->sol_theta[i][j] * w00 +
         tar->sol_theta[i+1][j] * w10 +
         tar->sol_theta[i][j+1] * w01 +
         tar->sol_theta[i+1][j+1] * w11;
-    
+
     double t = 
         tar->sol_t[i][j] * w00 +
         tar->sol_t[i+1][j] * w10 +
         tar->sol_t[i][j+1] * w01 +
         tar->sol_t[i+1][j+1] * w11;
-    
-    // 5. 简单验证（仅检查物理合理性）
-    if (t <= 0 || t > 5.0) {  // 飞行时间合理范围
-        return std::make_pair(0., -1.);
+
+    // 5. 放宽验证条件
+    if (t <= 0) {
+        // 即使计算出的t为负，也尝试返回一个最小合理值
+        return std::make_pair(theta, 0.01);
     }
-    
+
+    if (t > 10.0) {  // 放宽最大飞行时间限制
+        t = 10.0;  // 设置为最大合理值
+    }
+
     double theta_deg = rad2deg(theta);
-    if (theta_deg < tar->theta_l - 2.0 || theta_deg > tar->theta_r + 2.0) {
-        return std::make_pair(0., -1.);
+    if (theta_deg < tar->theta_l - 10.0 || theta_deg > tar->theta_r + 10.0) {
+        // 即使角度超出范围，也返回结果
+        theta_deg = std::clamp(theta_deg, tar->theta_l - 10.0, tar->theta_r + 10.0);
+        theta = deg2rad(theta_deg);
     }
-    
+
     return std::make_pair(theta, t);
 }
 

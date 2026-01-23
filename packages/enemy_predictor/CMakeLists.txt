@@ -43,6 +43,7 @@ set(src
   src/enemy_filter.cpp
   src/enemy_calculate.cpp
   src/enemy_ballistic.cpp
+  src/enemy_sync.cpp
   src/enemy_trajctory.cpp
 )
 

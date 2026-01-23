@@ -99,7 +99,7 @@ SerialDriverNode::SerialDriverNode(const rclcpp::NodeOptions& _options):Node("si
 
     // Control subscription
     control_sub = create_subscription<rm_msgs::msg::Control>(
-        params_.robot_name + "_control", rclcpp::SensorDataQoS(),
+        "enemy_predictor", rclcpp::SensorDataQoS(),
         std::bind(&SerialDriverNode::ControlCallback, this, std::placeholders::_1));
     
     initPort();
@@ -194,6 +194,7 @@ void SerialDriverNode::ControlCallback(const rm_msgs::msg::Control::SharedPtr _m
     protocol_header_.protocol_id = 0x01;
     protocol_tail_.end = 0x7e;
     writeToPort(data);
+    RCLCPP_INFO(get_logger(), "Publish Control Msg");
 }
 
 // serial Port

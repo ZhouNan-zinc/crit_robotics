@@ -127,7 +127,7 @@ class MotTracker(TrackerNodeInterface):
         super().__init__()  
         
         self.mot_tracker = ByteTrack(
-            max_age=4,
+            max_age=80,
             min_hits=2,
             iou_thres=None,
             conf_thres=0.3

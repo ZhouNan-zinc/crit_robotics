@@ -3,13 +3,25 @@
 #include "enemy_predictor/enemy_ballistic.h"
 
 
-Eigen::Isometry3d EnemyPredictorNode::getTrans(const std::string& source_frame, const std::string& target_frame) {
+Eigen::Isometry3d EnemyPredictorNode::getTrans(const std::string& source_frame, const std::string& target_frame, 
+                                               rclcpp::Time timestamp_image) {
     
-    geometry_msgs::msg::TransformStamped t = tf2_buffer->lookupTransform(
-        target_frame, 
-        source_frame, 
-        rclcpp::Time(0),
-        rclcpp::Duration::from_seconds(0.5));
+    geometry_msgs::msg::TransformStamped t;
+    try {
+        t = tf2_buffer->lookupTransform(
+            target_frame,
+            source_frame,
+            timestamp_image,
+            rclcpp::Duration::from_seconds(0.5)
+        );
+    } catch (const std::exception& ex) {
+        printf(
+            "Could not transform %s to %s: %s",
+            source_frame.c_str(),
+            target_frame.c_str(),
+            ex.what()
+        );
+    }
     // to Eigen::Isometry3d
     Eigen::Isometry3d transform = Eigen::Isometry3d::Identity();
     transform.translation() = Eigen::Vector3d(
@@ -26,9 +38,11 @@ Eigen::Isometry3d EnemyPredictorNode::getTrans(const std::string& source_frame, 
     transform.rotate(quat);
     
     return transform;
+    //return tf2::transformToEigen(t);
 } 
 void EnemyPredictorNode::updateArmorDetection(std::vector<cv::Point3f> object_points,
-                                              Detection& det) {
+                                              Detection& det,
+                                              rclcpp::Time timestamp_image) {
 
     std::vector<cv::Point2f> reprojected_points;
 
@@ -55,10 +69,11 @@ void EnemyPredictorNode::updateArmorDetection(std::vector<cv::Point3f> object_po
 
     cv::projectPoints(object_points, rvec, tvec, 
                        visualize_.camera_matrix, visualize_.dist_coeffs, reprojected_points);
-    if (reprojected_points.size() >= 4) {
-         cv::rectangle(visualize_.armor_img, reprojected_points[0], reprojected_points[2], 
-                       cv::Scalar(255, 0, 0), 2);
-    }
+    //if (reprojected_points.size() >= 4) {
+    //     cv::rectangle(visualize_.armor_img, reprojected_points[0], reprojected_points[2], 
+    //                   cv::Scalar(255, 0, 0), 2);
+    //}
+
     const cv::Point2f& p0 = reprojected_points[0];
     const cv::Point2f& p1 = reprojected_points[1];
     const cv::Point2f& p2 = reprojected_points[2];
@@ -72,10 +87,11 @@ void EnemyPredictorNode::updateArmorDetection(std::vector<cv::Point3f> object_po
     det.area_2d = std::abs(area) / 2.0;
 
     Eigen::Vector3d camera_tvec_eigen = Eigen::Map<Eigen::Vector3d>(visualize_.camera_tvec.ptr<double>());
-    visualize_.camara_to_odom = getTrans("camera_optical_frame", "odom");
+    visualize_.camara_to_odom = getTrans("camera_optical_frame", "odom", timestamp_image);
     RCLCPP_INFO(get_logger(), "armor_cam: %f, %f, %f", det.position[0], det.position[1], det.position[2]);
     
-    det.position = visualize_.camara_to_odom * det.position;  //cmeaodom
+    det.position = visualize_.camara_to_odom * det.position;  //camera to odom
+    visualizeAimCenter(det.position, cv::Scalar(225, 0, 225));
     RCLCPP_INFO(get_logger(), "armor_odom: %f, %f, %f", det.position[0], det.position[1], det.position[2]);
 }
 //--------------------------------Tracking with Armor Filter--------------------------------------------------
@@ -139,8 +155,9 @@ void EnemyPredictorNode::ToupdateArmors(const std::vector<Detection>& detections
         RCLCPP_INFO(get_logger(), "No Armor This Frame");
         return;
     }
-    for(size_t i = 0; i < detections.size(); i++){
-        
+    //Hack : For unkonwn Detection Results
+    for(size_t i = 0; i < 1; i++){
+        RCLCPP_INFO(get_logger(), "detections.size() =%d",detections.size());
         bool has_history_tracker = false;
         for (int i = 0; i < armor_trackers_.size(); i++) {
             
@@ -148,6 +165,7 @@ void EnemyPredictorNode::ToupdateArmors(const std::vector<Detection>& detections
             
             if(armor_trackers_[i].tracker_idx == detections[i].armor_idx){
                 active_armor_idx.push_back(i);
+                RCLCPP_INFO(get_logger(),"active_armors + 1");
                 armor_trackers_[i].update(detections[i].position, detections[i].armor_idx, timestamp, detections[i].yaw);
                 active_enemies_idx.push_back(armor_trackers_[i].assigned_enemy_idx);
                 //RCLCPP_INFO(this->get_logger(), "update tracker OK");
@@ -263,16 +281,14 @@ int EnemyPredictorNode::assignToEnemy(ArmorTracker& tracker, double timestamp) {
         return new_enemy.enemy_idx;
     }
 }
-void EnemyPredictorNode::EnemyManage(double timestamp, Command& cmd, EnemyPredictorNodeParams& params_) {
+void EnemyPredictorNode::EnemyManage(double timestamp, rclcpp::Time timestamp_image) {
     
     int target_enemy_id = -1;
     for (auto& enemy : enemies_) {
         bool update_this_frame = false;
         for(int i = 0; i < enemies_.size(); i++){
            if(enemy.enemy_idx == active_enemies_idx[i]){
-
               calculateEnemyCenterAndRadius(enemies_[active_enemies_idx[i]], timestamp);
-              RCLCPP_INFO(get_logger(),"Calculate Radius OK");
               enemy.is_alive = true;
               update_this_frame = true;
            }
@@ -292,6 +308,7 @@ void EnemyPredictorNode::EnemyManage(double timestamp, Command& cmd, EnemyPredic
     //是否需要考虑操作手按right键，但这一帧没有detect到操作手正在tracking的enemy？？？
     if(active_enemies_idx.size()== 1){
         target_enemy_id = active_enemies_idx[0];
+        RCLCPP_INFO(get_logger(),"target_enemy_id:%d",target_enemy_id);
     }
     else if(active_enemies_idx.size() > 1){
         RCLCPP_INFO(get_logger(),"active_enemies_idx > 1");
@@ -318,37 +335,39 @@ void EnemyPredictorNode::EnemyManage(double timestamp, Command& cmd, EnemyPredic
             for(int i = 0; i < active_enemies_idx.size(); i++){
                 //如果某个enemy只存在过一个装甲板的detection,使用const_radius但只做ekf得到cmd结果
                 //那么此时的enemy.center不准，但是choose enemy的时候需要使用enemy.center
-                //RCLCPP_INFO(get_logger(),"Start To Choose Target");
-                //Eigen::Vector3d enemy_center_cam = visualize_.camara_to_odom.inverse() *enemies_[active_enemies_idx[i]].center;
-                //
-                //std::vector<cv::Point2f> reprojected_points;
-                //std::vector<cv::Point3f> points_3d;
-                //cv::Point3f point_3d(enemy_center_cam.x(), enemy_center_cam.y(), enemy_center_cam.z());
-                //points_3d.push_back(point_3d);
-                //
-                //cv::projectPoints(points_3d, visualize_.camera_rvec, visualize_.camera_tvec, 
-                //          visualize_.camera_matrix, visualize_.dist_coeffs, reprojected_points);
-                //
-                //if(reprojected_points.size() > 0){
-                //    // Attention: camera和图传中心不一样，记得获取图传准星的标定结果！！！
-                //    float dx = static_cast<float>(reprojected_points[0].x - visualize_.camera_heart.x);
-                //    float dy = static_cast<float>(reprojected_points[0].y - visualize_.camera_heart.y);
-                //    double dis = std::sqrt(dx * dx + dy * dy);
-                //    if(dis < enemy_to_heart_min){
-                //        enemy_to_heart_min = dis;
-                //        target_enemy_id = active_enemies_idx[i];
-//
-                //    }
-                //}
+                RCLCPP_INFO(get_logger(),"Start To Choose Target");
+                Eigen::Vector3d enemy_center_cam = visualize_.camara_to_odom.inverse() *enemies_[active_enemies_idx[i]].center;
+                RCLCPP_INFO(get_logger(), "Enemy center in camera frame: x=%.3f, y=%.3f, z=%.3f", 
+                enemy_center_cam.x(), enemy_center_cam.y(), enemy_center_cam.z());
+
+                // DEBUG!!!!!!!!!!!! odom to camera ,but distance???????? 
+                std::vector<cv::Point2f> reprojected_points;
+                std::vector<cv::Point3f> points_3d;
+                cv::Point3f point_3d(enemy_center_cam.x(), enemy_center_cam.y(), enemy_center_cam.z());
+                points_3d.push_back(point_3d);
+                
+                cv::projectPoints(points_3d, visualize_.camera_rvec, visualize_.camera_tvec, 
+                          visualize_.camera_matrix, visualize_.dist_coeffs, reprojected_points);
+                
+                if(reprojected_points.size() > 0){
+                    // Attention: camera和图传中心不一样，记得获取图传准星的标定结果！！！
+                    float dx = static_cast<float>(reprojected_points[0].x - visualize_.camera_heart.x);
+                    float dy = static_cast<float>(reprojected_points[0].y - visualize_.camera_heart.y);
+                    double dis = std::sqrt(dx * dx + dy * dy);
+                    if(dis < enemy_to_heart_min){
+                        enemy_to_heart_min = dis;
+                        target_enemy_id = active_enemies_idx[i];
+
+                    }
+                }
                 target_enemy_id = active_enemies_idx[i];
             }
             RCLCPP_INFO(get_logger(),"Finish To Choose Target");
         }
-        RCLCPP_INFO(this->get_logger(),"Ready To Get Command");
-        //getCommand(enemies_[target_enemy_id], cmd, timestamp, params_);
-        //cmd.last_target_enemy_id = target_enemy_id;
     }
-
+    getCommand(enemies_[target_enemy_id], timestamp, timestamp_image);
+    cmd.last_target_enemy_id = target_enemy_id;
+    RCLCPP_INFO(get_logger(),"cmd.last_target_enemy_id:%d",cmd.last_target_enemy_id);
     //armor_trackers_ doesn't be cleared, enemies_索性也先不clear了
 
     // 清理长时间不更新的敌人
@@ -365,6 +384,7 @@ void EnemyPredictorNode::calculateEnemyCenterAndRadius(Enemy& enemy, double time
     // 收集活跃装甲板
     std::vector<ArmorTracker*> active_armors_this_enemy;
     RCLCPP_INFO(this->get_logger(), "armor_trackers_.size = %d",armor_trackers_.size());
+    RCLCPP_INFO(this->get_logger(), "active_armor_trackers_.size = %d",active_armor_idx.size());
     for (int idx : active_armor_idx) {
         if(armor_trackers_[idx].assigned_enemy_idx == enemy.enemy_idx){
             active_armors_this_enemy.push_back(&armor_trackers_[idx]);
@@ -416,6 +436,7 @@ void EnemyPredictorNode::calculateEnemyCenterAndRadius(Enemy& enemy, double time
                 
                 enemy.radius = 0.8 * enemy.radius + 0.2 * avg_radius;
                 enemy.radius_cal = true;
+                RCLCPP_INFO(get_logger(), "Calculate Radius Is TRUE!");
             } else {
                 // 交点不在正向，使用几何中心
                 useGeometricCenterSimple(enemy, active_armors_this_enemy);
@@ -426,7 +447,7 @@ void EnemyPredictorNode::calculateEnemyCenterAndRadius(Enemy& enemy, double time
         }
     }
     else {
-        // 多个装甲板：几何中心(no possiblity)
+        // 多个装甲板：几何中心(no possiblity)[Acutally, in our super new imagepipe, that is possible.]
         useGeometricCenterSimple(enemy, active_armors_this_enemy);
     }
     if(!active_armors_this_enemy.empty() && active_armors_this_enemy[0] != nullptr) {
@@ -450,6 +471,15 @@ void EnemyPredictorNode::useGeometricCenterSimple(Enemy& enemy,
         sum_pos += armor->position;
     }
     enemy.center = sum_pos / active_armors.size();
+
+    double sum_radius = 0.0;
+    for (auto armor : active_armors) {
+        sum_radius += (enemy.center - armor->position).norm();
+    }
+    double avg_radius = sum_radius / active_armors.size();
+    enemy.radius = 0.5 * enemy.radius + 0.5 * avg_radius;
+    enemy.radius_cal = true;
+    RCLCPP_INFO(get_logger(), "Calculate Radius Is TRUE!");
 }
 //Phase_id 处理1
 //void EnemyPredictorNode::updateArmorPhase(Enemy& enemy, ArmorTracker& tracker, double timestamp) {
@@ -642,15 +672,17 @@ void EnemyPredictorNode::findBestPhaseForEnemy(Enemy& enemy, ArmorTracker& track
     //    }
     //}
 }
-int EnemyPredictorNode::ChooseMode(Enemy &enemy, double timestamp, Command& cmd){
+int EnemyPredictorNode::ChooseMode(Enemy &enemy, double timestamp){
     if(enemy.enemy_ckf.Xe(5) > cmd.high_spd_rotate_thresh){
        return 1;
     }else{
        return 0;
     }
 }
-void EnemyPredictorNode::getCommand(Enemy& enemy, Command& cmd, double timestamp, EnemyPredictorNodeParams& params_ ){
-    cmd.cmd_mode = ChooseMode(enemy, timestamp, cmd);
+void EnemyPredictorNode::getCommand(Enemy& enemy, double timestamp, rclcpp::Time timestamp_image){
+    
+    cmd.cmd_mode = ChooseMode(enemy, timestamp);
+    RCLCPP_INFO(get_logger(),"MODE :%d",cmd.cmd_mode);
     cmd.target_enemy_id = enemy.type;
     auto predict_func_double = [this, &enemy](ArmorTracker& tracker, double time_offset) -> Eigen::Vector3d{
         return FilterManage(enemy, time_offset, tracker);
@@ -670,7 +702,7 @@ void EnemyPredictorNode::getCommand(Enemy& enemy, Command& cmd, double timestamp
         double enemy_yaw_xy = std::atan2(enemy.center_pre[1], enemy.center_pre[0]); 
         
         for(int i = 0; i < active_trackers.size(); i++){
-           auto [ball_res, p] = calc_ballistic_((params_.response_delay + params_.shoot_delay), cmd, timestamp, *active_trackers[i], predict_func_double);
+           auto [ball_res, p] = calc_ballistic_((params_.response_delay + params_.shoot_delay), timestamp_image, *active_trackers[i], predict_func_double);
            
            armor_center_pre = FilterManage(enemy, ball_res.t, *active_trackers[i]);
 
@@ -696,14 +728,16 @@ void EnemyPredictorNode::getCommand(Enemy& enemy, Command& cmd, double timestamp
         else if(active_trackers.size() == 1){
             
             //如果没有用同时出现的两个armor计算过radius,那么不用整车ckf,直接使用ekf.update/predict
+            RCLCPP_INFO(get_logger(),"To Calculate ballistic");
             auto [ball_res, p] = calc_ballistic_(
                 (params_.response_delay + params_.shoot_delay), 
-                cmd, 
-                timestamp, 
+                timestamp_image, 
                 *active_trackers[0],  
                 predict_func_double
             );
             cmd.aim_center = FilterManage(enemy, ball_res.t, *active_trackers[0]);
+            cmd.cmd_yaw = ball_res.yaw;
+            cmd.cmd_pitch = ball_res.pitch;
         }
         
         else{
@@ -727,30 +761,30 @@ void EnemyPredictorNode::getCommand(Enemy& enemy, Command& cmd, double timestamp
 
             auto [ball_res, p] = calc_ballistic_(
                 (params_.response_delay + params_.shoot_delay), 
-                cmd, 
-                timestamp, 
+                timestamp_image, 
                 *best_tracker, 
                 predict_func_double
             );
             cmd.aim_center = FilterManage(enemy, ball_res.t, *best_tracker);
+            cmd.cmd_yaw = ball_res.yaw;
+            cmd.cmd_pitch = ball_res.pitch;
         }
     }
-    //visualizeAimCenter(cmd.aim_center);
+    RCLCPP_INFO_STREAM(get_logger(), "cmd.cmd_yaw:" << cmd.cmd_yaw);
+    RCLCPP_INFO_STREAM(get_logger(), "cmd.cmd_pitch:" << cmd.cmd_pitch);
 }
 std::pair<Ballistic::BallisticResult, Eigen::Vector3d> EnemyPredictorNode::calc_ballistic_
-            (double delay, Command& cmd, double timestamp, ArmorTracker& tracker, std::function<Eigen::Vector3d(ArmorTracker&, double)> _predict_func)
+            (double delay, rclcpp::Time timestamp_image, ArmorTracker& tracker, std::function<Eigen::Vector3d(ArmorTracker&, double)> _predict_func)
 {
-    RCLCPP_INFO(this->get_logger(), "Calculating ballistic...");
-    
+
     Ballistic::BallisticResult ball_res;
     Eigen::Vector3d predict_pos_odom;
-    Eigen::Isometry3d odom2gimbal_transform = getTrans("odom", "gimbal");
-    double t_fly = 0;  // 飞行时间（迭代求解）
-    
+    Eigen::Isometry3d odom2gimbal_transform = getTrans("odom", "gimbal", timestamp_image);
+    double t_fly = 0.0;  // 飞行时间（迭代求解）
+
     auto tick = std::chrono::steady_clock::now();
     auto tick_duration = tick.time_since_epoch();
     double tick_seconds = std::chrono::duration<double>(tick_duration).count();
-    RCLCPP_INFO(this->get_logger(), "tick time: %.6f", tick_seconds);
 
     for (int i = 0; i < 6; ++i) {
         auto tock = std::chrono::steady_clock::now();
@@ -762,23 +796,25 @@ std::pair<Ballistic::BallisticResult, Eigen::Vector3d> EnemyPredictorNode::calc_
         RCLCPP_INFO(this->get_logger(), "latency time: %.6f", latency);
         predict_pos_odom = _predict_func(tracker, t_fly + latency);
     } 
-    RCLCPP_INFO(get_logger(),"Finish To Get dt");
+    
+    RCLCPP_INFO_STREAM(get_logger(), "predict_pos_odom: " << predict_pos_odom(0) << ", " << predict_pos_odom(1) << ", " << predict_pos_odom(2));
+    RCLCPP_INFO_STREAM(rclcpp::get_logger("Ballistic"), "odom2gimbal_transform:\n" << odom2gimbal_transform.matrix());
+    visualizeAimCenter(predict_pos_odom, cv::Scalar(0, 0, 255));
     ball_res = bac.final_ballistic(odom2gimbal_transform, predict_pos_odom);
-    RCLCPP_INFO(this->get_logger(), "  ball_res ---------------");
+
     if (ball_res.fail) {
         RCLCPP_WARN(get_logger(), "[calc Ballistic] too far to hit it\n");
         return {ball_res, predict_pos_odom};
     }
-     t_fly = ball_res.t;
-    
+    t_fly = ball_res.t;
+
     // 考虑自身z的变化
-    Eigen::Vector3d z_vec;
-    z_vec << 0, 0, cmd.robot.z_velocity * (params_.shoot_delay + t_fly);
-    ball_res = bac.final_ballistic(odom2gimbal_transform, predict_pos_odom - z_vec);
-    if (ball_res.fail) {
-        RCLCPP_WARN(get_logger(), "[calc Ballistic] too far to hit it\n");
-    }
-    RCLCPP_DEBUG(get_logger(), "calc_ballistic: predict_pos_odom: %f %f %f", predict_pos_odom(0), predict_pos_odom(1), predict_pos_odom(2));
+    //Eigen::Vector3d z_vec = Eigen::Vector3d::Zero();
+    // address it later!!!!!!!!!!!!!!!!!!!
+    //z_vec << 0, 0, cmd.robot.z_velocity * (params_.shoot_delay + t_fly);
+
+    //ball_res = bac.final_ballistic(odom2gimbal_transform, predict_pos_odom - z_vec);
+    //RCLCPP_DEBUG(get_logger(), "calc_ballistic: predict_pos_odom: %f %f %f", predict_pos_odom(0), predict_pos_odom(1), predict_pos_odom(2));
     return {ball_res, predict_pos_odom};
 }
 Eigen::Vector3d EnemyPredictorNode::FilterManage(Enemy &enemy, double dt, ArmorTracker& tracker){
@@ -786,13 +822,16 @@ Eigen::Vector3d EnemyPredictorNode::FilterManage(Enemy &enemy, double dt, ArmorT
     Eigen::Vector3d xyyaw_pre_ekf = tracker.ekf.predict_position(dt);
     ZEKF::Vz z_pre = tracker.zekf.predict_position(dt);              // z的处理后面再调，用z_ekf or 均值滤波
     Eigen::Vector3d xyz_ekf_pre = Eigen::Vector3d(xyyaw_pre_ekf[0], xyyaw_pre_ekf[1], z_pre[0]);
-    //visualizeAimCenter(xyz_ekf_pre, cv::Scalar(0, 255, 0));
+    visualizeAimCenter(xyz_ekf_pre, cv::Scalar(0, 255, 0));
     if(!enemy.radius_cal){
        return xyz_ekf_pre;
     }
     Eigen::Vector3d xyyaw_pre_ckf = enemy.enemy_ckf.predictArmorPosition(enemy.best_armor, dt);
+    Eigen::Vector3d enemy_xyz = Eigen::Vector3d(enemy.enemy_ckf.Xe(0),enemy.enemy_ckf.Xe(2), z_pre[0]);
     Eigen::Vector3d xyz_ckf_pre = Eigen::Vector3d(xyyaw_pre_ckf[0], xyyaw_pre_ckf[1], z_pre[0]);
+
     //visualizeAimCenter(xyz_ckf_pre, cv::Scalar(255, 0, 0));
+    visualizeAimCenter(enemy_xyz, cv::Scalar(255, 0, 0));
     
     double k = 1.0;
     double r0 = 1.0;
@@ -851,11 +890,8 @@ void EnemyPredictorNode::create_new_tracker(const Detection &detection,double ti
     new_tracker.assigned_enemy_idx = assignToEnemy(new_tracker, timestamp);
 
     active_armor_idx.push_back(armor_trackers_.size()); // 先后push_back的顺序
+    RCLCPP_INFO(get_logger(),"active_armors + 1");
     armor_trackers_.push_back(new_tracker);
-   
-    RCLCPP_INFO(this->get_logger(),
-               "Created %d new tracker %d", armor_trackers_.size(),
-               new_tracker.tracker_idx);
 }
 int EnemyPredictorNode::estimatePhaseFromPosition(const Enemy& enemy, const ArmorTracker& tracker) {
     
@@ -910,8 +946,8 @@ void EnemyPredictorNode::visualizeAimCenter(const Eigen::Vector3d& armor_odom,
         RCLCPP_WARN(this->get_logger(), "armor_img has invalid size, skipping visualization");
         return;
     }
-    
-    // 1. 将odom系坐标转换到相机系
+    try{
+            // 1. 将odom系坐标转换到相机系
     Eigen::Vector3d aim_center_cam = visualize_.camara_to_odom.inverse() * armor_odom;
     
     // 2. 准备3D点（相机坐标系下）
@@ -963,13 +999,13 @@ void EnemyPredictorNode::visualizeAimCenter(const Eigen::Vector3d& armor_odom,
             cv::circle(visualize_.armor_img, center, 8, point_color, -1);   // 实心圆
             
             // 显示3D坐标和颜色信息
-            std::string label = cv::format("(%.1f,%.1f,%.1f) [BGR:%d,%d,%d]", 
-                                          armor_odom.x(), armor_odom.y(), armor_odom.z(),
-                                          (int)point_color[0], (int)point_color[1], (int)point_color[2]);
-            cv::putText(visualize_.armor_img, label, 
-                       cv::Point(center.x + 10, center.y - 10),
-                       cv::FONT_HERSHEY_SIMPLEX, 0.5, 
-                       cv::Scalar(255, 255, 255), 1);  // 白色文字
+            //std::string label = cv::format("(%.1f,%.1f,%.1f) [BGR:%d,%d,%d]", 
+            //                              armor_odom.x(), armor_odom.y(), armor_odom.z(),
+            //                              (int)point_color[0], (int)point_color[1], (int)point_color[2]);
+            //cv::putText(visualize_.armor_img, label, 
+            //           cv::Point(center.x + 10, center.y - 10),
+            //           cv::FONT_HERSHEY_SIMPLEX, 0.5, 
+            //           cv::Scalar(255, 255, 255), 1);  // 白色文字
         } else {
             RCLCPP_WARN(this->get_logger(), 
                        "Projected point (%.1f, %.1f) out of image bounds [%d x %d]", 
@@ -978,6 +1014,11 @@ void EnemyPredictorNode::visualizeAimCenter(const Eigen::Vector3d& armor_odom,
     } else {
         RCLCPP_WARN(this->get_logger(), "No projected points or empty image");
     }
+    } catch (const std::exception& e) {
+        RCLCPP_ERROR_STREAM(this->get_logger(), 
+                    "Cv Project:"  << e.what());
+    }
+   
 }
 
 

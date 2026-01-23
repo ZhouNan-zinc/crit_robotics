@@ -13,7 +13,7 @@ EnemyPredictorNode::EnemyPredictorNode(const rclcpp::NodeOptions& options)
     tf2_listener = std::make_shared<tf2_ros::TransformListener>(*tf2_buffer);
 
     detector_sub=create_subscription<vision_msgs::msg::Detection2DArray>(
-        "/vision/tracked", rclcpp::QoS(10), std::bind(&EnemyPredictorNode::detection_callback, this, std::placeholders::_1));
+        "/vision/raw", rclcpp::QoS(10), std::bind(&EnemyPredictorNode::detection_callback, this, std::placeholders::_1));
     //取决于电控给我发消息的频率, 要适配 HighFrequencyCallback()
     imu_sub=create_subscription<rm_msgs::msg::RmRobot>(
         "rm_robot", rclcpp::SensorDataQoS(), std::bind(&EnemyPredictorNode::robot_callback, this, std::placeholders::_1));
@@ -27,7 +27,6 @@ EnemyPredictorNode::EnemyPredictorNode(const rclcpp::NodeOptions& options)
         "raw"
     );
     control_pub = create_publisher<rm_msgs::msg::Control>("enemy_predictor", rclcpp::SensorDataQoS());
-
     //high_freq_timer_ = this->create_wall_timer(std::chrono::milliseconds(2),  // 2ms = 500Hz
     //                                           std::bind(&EnemyPredictorNode::HighFrequencyCallback, this));
     
@@ -168,6 +167,9 @@ Ballistic::BallisticParams EnemyPredictorNode::create_ballistic_params() {
         this->declare_parameter("ballistic.y_l", -5.0);
         this->declare_parameter("ballistic.y_r", 5.0);
         this->declare_parameter("ballistic.y_n", 1000);
+
+        params.pitch2yaw_t = 
+        this->declare_parameter("pitch2yaw_t", std::vector<double>{0.0, 0.0, 0.0});
         
         this->declare_parameter("ballistic.table_dir", "");
         
@@ -187,9 +189,9 @@ Ballistic::BallisticParams EnemyPredictorNode::create_ballistic_params() {
         params.l = this->get_parameter("ballistic.l").as_double();
         
         // 角度参数（度转弧度）
-        params.theta_l = this->get_parameter("ballistic.theta_l").as_double() * M_PI / 180.0;
-        params.theta_r = this->get_parameter("ballistic.theta_r").as_double() * M_PI / 180.0;
-        params.theta_d = this->get_parameter("ballistic.theta_d").as_double() * M_PI / 180.0;
+        params.theta_l = this->get_parameter("ballistic.theta_l").as_double();
+        params.theta_r = this->get_parameter("ballistic.theta_r").as_double();
+        params.theta_d = this->get_parameter("ballistic.theta_d").as_double();
         
         params.x_l = this->get_parameter("ballistic.x_l").as_double();
         params.x_r = this->get_parameter("ballistic.x_r").as_double();
@@ -209,17 +211,19 @@ Ballistic::BallisticParams EnemyPredictorNode::create_ballistic_params() {
         
         // 设置默认的偏移量（二维数组）
         params.stored_cam2gun_offset = std::vector<std::vector<double>>(5, 
-            std::vector<double>{0.0, 0.0, 0.0});
+            std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0});
         
         // 设置默认的偏移量
         params.stored_yaw_offset = std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0};
         params.stored_pitch_offset = std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0};
-        
+     
+        params.yaw2gun_offset = sqrt(params.pitch2yaw_t[0] * params.pitch2yaw_t[0] + params.pitch2yaw_t[1] * params.pitch2yaw_t[1]);    
+        RCLCPP_INFO(this->get_logger(), "params.yaw2gun_offset = %lf",params.yaw2gun_offset);
         RCLCPP_INFO(this->get_logger(), 
                    "Ballistic params created: v15=%.1f m/s, theta=[%.1f°, %.1f°]",
                    params.v15, 
-                   params.theta_l * 180.0 / M_PI,
-                   params.theta_r * 180.0 / M_PI);
+                   params.theta_l ,
+                   params.theta_r);
         
     } catch (const std::exception& e) {
         RCLCPP_ERROR(this->get_logger(), 
@@ -235,30 +239,35 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
         return;
     }
     std::vector<cv::Point3f> object_points;
-    rclcpp::Time time = this -> now();
-    double timestamp = time.seconds();
+    time_det = this -> now();
+    double timestamp = time_det.seconds();
     const auto& detections = detection_msg->detections;
-    //visualize_.image_frame = detection_msg -> header.frame_id;
-    //if(visualize_.image_frame.empty()){
-    //    RCLCPP_WARN(get_logger(), "Empty Frame_ID");
-    //    return;
-    //}
-    //RCLCPP_INFO(get_logger(), "frame_id:%s",visualize_.image_frame);
+    time_image = detection_msg-> header.stamp;
+
     current_detections_.clear();
     active_armor_idx.clear();
     active_enemies_idx.clear();
 
     for (const auto& detection : detections) {
+        if(detection.bbox.size_x / detection.bbox.size_y < 0.5 || detection.bbox.size_x / detection.bbox.size_y > 4){
+            continue;
+        }
         Detection det;
-        det.armor_idx = std::stoi(detection.id);
-    
+        //det.armor_idx = std::stoi(detection.id);
+        det.armor_idx = 0;
+        
         const auto& results_ = detection.results;
         for(const auto& res : results_){
             const auto& pos = res.pose;
             det.position = Eigen::Vector3d(pos.pose.position.x, pos.pose.position.y, pos.pose.position.z) ;
-            RCLCPP_INFO(get_logger(), "pnp xyz: %f, %f, %f", det.position[0], det.position[1], det.position[2]);
+            
             det.orientation = Eigen::Vector3d(pos.pose.orientation.x, pos.pose.orientation.y, pos.pose.orientation.z);
-            det.yaw = pos.pose.orientation.z + imu_.current_yaw;
+            double current_yaw = 0.0;
+            if (getCurrentYaw(time_image, current_yaw)){
+                det.yaw = pos.pose.orientation.z + current_yaw;
+            }else{
+                RCLCPP_INFO(get_logger(),"No Current Yaw From Imu!!!");
+            }
             det.armor_class_id = std::stoi(res.hypothesis.class_id);
             
             if(det.armor_class_id % 10 == 1){
@@ -266,49 +275,67 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
             }else{
                 object_points = small_object_points;
             }
-            updateArmorDetection(object_points, det);
+            updateArmorDetection(object_points, det, time_image);
         }
         current_detections_.push_back(det);
     }
-     //if (params_.mode != VisionMode::AUTO_AIM) {
+    if(current_detections_.empty()){
+        return;
+    }
+    //if (params_.mode != VisionMode::AUTO_AIM) {
      //    return;
      //}
+     double area_2d_ = 0.0;
+     for(const auto& det_ : current_detections_){
+        if(det_.area_2d > area_2d_){
+            current_detections_[0] = det_;
+        }
+     }
     ToupdateArmors(current_detections_, timestamp);
-    EnemyManage(timestamp, cmd, params_);
+    EnemyManage(timestamp, time_image);
     if (cmd.aim_center.x() != -999){
-        control_msg-> pitch = cmd.cmd_pitch;
-        control_msg-> flag = 1;
-        control_msg-> cam_mode = frame_info.cam_mode;
-        control_msg-> vision_follow_id = enemies_[cmd.target_enemy_id].type;
+        rm_msgs::msg::Control control_msg{};
+        control_msg.pitch = cmd.cmd_pitch;
+        //RCLCPP_INFO(get_logger(), "cmd.cmd_pitch =%d", cmd.cmd_pitch);
+        control_msg.flag = 1;
+        //control_msg.vision_follow_id = enemies_[cmd.target_enemy_id].type;
         if(cmd.cmd_mode == 0){
-           control_msg-> rate = 18; // adjust it later!!!
-           control_msg-> one_shot_num = 3;
+           control_msg.rate = 0; // adjust it later!!!
+           control_msg.one_shot_num = 0;
         }
         else if(cmd.cmd_mode == 1){
-           control_msg-> rate = 18;
-           control_msg-> one_shot_num = 1;
+           control_msg.rate = 0;
+           control_msg.one_shot_num = 0;
         }
-        double current_yaw = robot.imu.yaw;
-        //bool success = yaw_planner.setTargetYaw(cmd.cmd_yaw, current_yaw);
+        //bool success = yaw_planner.setTargetYaw(cmd.cmd_yaw, imu_.current_yaw);
         bool success = false;    //先把自瞄调通
         if(!success){
-            control_msg-> yaw = cmd.cmd_yaw;
+            control_msg.yaw = cmd.cmd_yaw;
             publish_mode_ = PublishMode::FRAME_RATE_MODE;
-            control_pub-> publish(*control_msg);
+            control_pub-> publish(std::move(control_msg));
         }else{
             publish_mode_ = PublishMode::HIGH_FREQ_MODE;
         }
     }
-     //cv::imshow("Armor_img", visualize_.armor_img);
-     //cv::waitKey(10);
+    cv::imshow("Armor_img", visualize_.armor_img);
+    cv::waitKey(10);
 }
 void EnemyPredictorNode::robot_callback(const rm_msgs::msg::RmRobot::SharedPtr robot_msg){
     robot = *robot_msg;
     //params_.mode = robot.vision_mode;
     //params_.cam_mode = frame_info.cam_mode;
-    params_.right_press = robot.right_press;
-    imu_.current_yaw = robot_msg->imu.yaw;
-    RCLCPP_INFO(get_logger(),"imu.yaw =%d", imu_.current_yaw);
+    params_.right_press = robot_msg->right_press;
+    params_.right_press = false; // For Debug
+    ImuData data;
+    data.timestamp = robot_msg->header.stamp;
+    data.current_yaw = robot_msg->imu.yaw;
+
+    imu_buffer_.push_back(data);
+
+    if (imu_buffer_.size() > 500) {
+        cleanOldImuData();
+    }
+    // RCLCPP_INFO_STREAM(get_logger(), "imu.yaw =" << imu_.current_yaw);
     //RCLCPP_INFO(this->get_logger(),  "IMU - Roll: %.3f°, Pitch: %.3f°, Yaw: %.3f°",robot.imu.roll, robot.imu.pitch, robot.imu.yaw);
 }
 /*void EnemyPredictorNode::HighFrequencyCallback() {
