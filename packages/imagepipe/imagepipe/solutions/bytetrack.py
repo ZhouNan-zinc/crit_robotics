@@ -1,5 +1,6 @@
 from typing import Any
 
+import cv2
 import numba
 import lap
 import numpy as np
@@ -76,8 +77,6 @@ class KalmanFilter:
         self.P = self.F @ self.P @ self.F.T + self.Q
         return self.x
 
-    def update(self, z):
-        """Assimilate a measurement vector ``z`` into the filter state."""
     def update(self, z):
         z = np.asarray(z).reshape((self.dim_z, 1))
         y = z - self.H @ self.x
@@ -164,7 +163,6 @@ class TrackingObject:
 
         self._time_since_update = 0
         self._history = []
-        self._hits = 0
         self._hit_streak = 0
         self._age = 0
         self._id = None
@@ -196,7 +194,6 @@ class TrackingObject:
 
         self._time_since_update = 0
         self._history = []
-        self._hits += 1
         self._hit_streak += 1
         self._kf.update(convert_bbox_to_z(self.bbox))
 
@@ -208,7 +205,7 @@ class TrackingObject:
         self._kf.predict()
         self._age += 1
 
-        if(self._time_since_update>0):
+        if(self._time_since_update > 0):
             self._hit_streak = 0
 
         self._time_since_update += 1
@@ -223,11 +220,11 @@ def linear_assignment(cost_matrix):
     cost_matrix = np.asarray(cost_matrix, dtype=np.float32)
     _, x, _ = lap.lapjv(cost_matrix, extend_cost=True)
 
-    matches = []
+    matched = []
     for row, col in enumerate(x):
         if col >= 0:
-            matches.append([row, col])   # row=det_idx, col=trk_idx
-    return np.asarray(matches, dtype=int)
+            matched.append([row, col])   # row=det_idx, col=trk_idx
+    return np.asarray(matched, dtype=int)
 
 
 @numba.njit(fastmath=True, cache=True)
@@ -298,20 +295,17 @@ def assign(detections: list[TrackingObject],
     T = len(trackers)
 
     if D == 0 or T == 0:
-        matches = np.empty((0, 2), dtype=int)
+        matched = np.empty((0, 2), dtype=int)
         unmatched_detections = np.arange(D, dtype=int)
         unmatched_trackers = np.arange(T, dtype=int)
-        return matches, unmatched_detections, unmatched_trackers
+        return matched, unmatched_detections, unmatched_trackers
 
-    # --- CHANGED: build bbox arrays (float32) ---
     bbox_detections = np.asarray([det.bbox for det in detections], dtype=np.float32).reshape(-1, 4)
     bbox_trackers   = np.asarray([trk.bbox for trk in trackers], dtype=np.float32).reshape(-1, 4)
 
-    # --- CHANGED: class id arrays ---
     class_id_detections = np.asarray([det.class_id for det in detections], dtype=np.int32)
     class_id_trackers   = np.asarray([trk.class_id for trk in trackers], dtype=np.int32)
 
-    # --- CHANGED: build IOU matrix by class blocks (compute only same-class pairs) ---
     iou_matrix = np.zeros((D, T), dtype=np.float32)
 
     classes = np.intersect1d(np.unique(class_id_detections), np.unique(class_id_trackers))
@@ -337,19 +331,16 @@ def assign(detections: list[TrackingObject],
     else:
         matched_indices = np.empty((0, 2), dtype=int)
 
-    # --- CHANGED: filter matches by IOU threshold (important after Hungarian) ---
     if len(matched_indices) > 0:
         pair_ious = iou_matrix[matched_indices[:, 0], matched_indices[:, 1]]
         keep = pair_ious >= iou_thres
-        matches = matched_indices[keep]
+        matched = matched_indices[keep]
     else:
-        matches = np.empty((0, 2), dtype=int)
+        matched = np.empty((0, 2), dtype=int)
 
-    # unmatched sets
-    matched_det_ids = matches[:, 0] if len(matches) > 0 else np.array([], dtype=int)
-    matched_trk_ids = matches[:, 1] if len(matches) > 0 else np.array([], dtype=int)
+    matched_det_ids = matched[:, 0] if len(matched) > 0 else np.array([], dtype=int)
+    matched_trk_ids = matched[:, 1] if len(matched) > 0 else np.array([], dtype=int)
 
-    # --- CHANGED: faster unmatched computation via boolean mask (optional but clean) ---
     det_mask = np.zeros(D, dtype=bool)
     trk_mask = np.zeros(T, dtype=bool)
     det_mask[matched_det_ids] = True
@@ -358,7 +349,7 @@ def assign(detections: list[TrackingObject],
     unmatched_detections = np.where(~det_mask)[0].astype(int)
     unmatched_trackers   = np.where(~trk_mask)[0].astype(int)
 
-    return matches, unmatched_detections, unmatched_trackers
+    return matched, unmatched_detections, unmatched_trackers
 
 
 class ByteTrack:
@@ -370,13 +361,13 @@ class ByteTrack:
 
     def __init__(
         self,
-        max_age:int=30,
-        min_hits:int=3,
+        max_age:int|None=None,
+        min_hits:int|None=None,
         iou_thres:float|None = None,
         conf_thres:float|None = None
     ):
-        self.max_age = max_age
-        self.min_hits = min_hits
+        self.max_age = max_age if max_age is not None else 0
+        self.min_hits = min_hits if min_hits is not None else 1
         self.iou_thres = iou_thres if iou_thres is not None else -np.inf
         self.conf_thres = conf_thres if conf_thres is not None else 0.
         self.frame_count = 0
@@ -389,32 +380,70 @@ class ByteTrack:
         """
         self.frame_count += 1
 
+        # DEBUG:
+        # TODO: Create an empty matrix in all black
+
+        def _to_int_bbox(bbox: np.ndarray) -> tuple[int, int, int, int]:
+            arr = np.asarray(bbox).reshape(-1)
+            x1, y1, x2, y2 = arr[:4]
+            return int(x1), int(y1), int(x2), int(y2)
+
+        def _draw_bbox(img: np.ndarray, bbox: np.ndarray, color: tuple[int, int, int], label: str | None = None):
+            x1, y1, x2, y2 = _to_int_bbox(bbox)
+            cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+            if label:
+                cv2.putText(img, label, (x1, max(0, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+        bboxes_for_canvas: list[np.ndarray] = []
+        for det in detections:
+            if det.bbox is not None:
+                bboxes_for_canvas.append(np.asarray(det.bbox))
+
         for idx, trk in reversed(list(enumerate(self.trackers))):
             bbox = trk.predict()
             if np.any(np.isnan(bbox)):
                 self.trackers.pop(idx)
                 continue
             self.trackers[idx].bbox = bbox
+            bboxes_for_canvas.append(np.asarray(bbox))
 
+        if bboxes_for_canvas:
+            max_x = max(int(np.max(bbox[:4:2])) for bbox in bboxes_for_canvas)
+            max_y = max(int(np.max(bbox[1:4:2])) for bbox in bboxes_for_canvas)
+            width = max(1, max_x + 10)
+            height = max(1, max_y + 10)
+            image = np.zeros((height, width, 3), dtype=np.uint8)
+
+            for det in detections:
+                if det.bbox is not None:
+                    _draw_bbox(image, det.bbox, (80, 220, 255), "det")
+
+            for trk in self.trackers:
+                if trk.bbox is not None:
+                    label = f"id:{trk.id}" if trk.id is not None else "trk"
+                    _draw_bbox(image, trk.bbox, (255, 120, 60), label)
+
+            cv2.imshow("ByteTrack Debug", image)
+            cv2.waitKey(1)
 
         high_score_detections = [det for det in detections if det.score >= self.conf_thres]
         low_score_detections  = [det for det in detections if det.score <  self.conf_thres]
 
-        matches_high, unmatched_det_high, unmatched_trk_high = assign(
+        matched_high, unmatched_det_high, unmatched_trk_high = assign(
             high_score_detections, self.trackers, self.iou_thres
         )
 
-        for det_idx, trk_idx in matches_high:
+        for det_idx, trk_idx in matched_high:
             self.trackers[trk_idx].update(high_score_detections[det_idx])
 
         if len(unmatched_trk_high) > 0 and len(low_score_detections) > 0:
             remaining_trackers = [self.trackers[i] for i in unmatched_trk_high]
 
-            matches_low, _, _ = assign(
+            matched_low, _, _ = assign(
                 low_score_detections, remaining_trackers, self.iou_thres
             )
 
-            for det_idx, local_trk_idx in matches_low:
+            for det_idx, local_trk_idx in matched_low:
                 trk_idx = unmatched_trk_high[local_trk_idx]  # map local index -> global index
                 self.trackers[trk_idx].update(low_score_detections[det_idx])
 
@@ -428,7 +457,7 @@ class ByteTrack:
 
         outputs = []
         for t in self.trackers:
-            if t._hits >= self.min_hits or self.frame_count <= self.min_hits:
+            if t._hit_streak >= self.min_hits or self.frame_count <= self.min_hits:
                 outputs.append(t)
 
-        return self.trackers
+        return outputs

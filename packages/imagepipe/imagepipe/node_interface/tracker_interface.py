@@ -2,6 +2,7 @@
 
 from abc import abstractmethod, ABC
 
+import cv2
 from rclpy.node import Node
 from rclpy.time import Time
 from rclpy.logging import RcutilsLogger
@@ -82,17 +83,9 @@ class TrackerNodeInterface(Node, ABC):
             )
         )
 
-        self.stamp_thres = self.get_clock().now()
-
     def callback(self, msg: Detection2DArray):
-        stamp = Time.from_msg(msg.header.stamp, clock_type=self.get_clock().clock_type)
-        # if stamp < self.stamp_thres:
-            # self.logger.warning("Message not in order, check your image pipeline. Dropping message.")
-            # return
-        self.stamp_thres = stamp
-
         raw_detections = [TrackingObject(
-            class_id=int(float(det.results[0].hypothesis.class_id)),
+            class_id=int(float(det.results[0].hypothesis.class_id)) % 10,
             score=float(det.results[0].hypothesis.score),
             bbox=cxcywh2xyxy(np.array([det.bbox.center.position.x, det.bbox.center.position.y, det.bbox.size_x, det.bbox.size_y])),
             message=det
@@ -127,8 +120,7 @@ class MotTracker(TrackerNodeInterface):
         super().__init__()  
         
         self.mot_tracker = ByteTrack(
-            max_age=4,
-            min_hits=2,
+            min_hits=3,
             iou_thres=None,
             conf_thres=0.3
         )
