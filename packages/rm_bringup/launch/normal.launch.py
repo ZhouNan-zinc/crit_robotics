@@ -56,7 +56,7 @@ def generate_launch_description():
         ),
         Node(
             package="simple_serial_driver",
-            executable="serial_driver_node",
+            executable="simple_serial_driver_node",
             name="simple_serial_driver",
             parameters=ros_parameters,
             on_exit=Shutdown(),

@@ -131,7 +131,7 @@ ArmorXYYAWEKF::Vx ArmorXYYAWEKF::update(Vz observe_Zk,double timestamp){
     }
     double dt = timestamp - last_timestamp;
     if (dt <= 0) { 
-        std::cerr << "Invalid dt: " << dt << ", using default 0.01" << std::endl;
+        std::cerr << "XYYAWEKF:Invalid dt: " << dt << ", using default 0.01" << std::endl;
         dt = 0.01;
     }
 
@@ -207,7 +207,7 @@ ZEKF::Vx ZEKF::update(Vz observe_Zk,double timestamp){
     }
     double dt = timestamp - last_timestamp;
     if (dt <= 0) { 
-        std::cerr << "Invalid dt: " << dt << ", using default 0.01" << std::endl;
+        std::cerr << "ZEKF:Invalid dt: " << dt << ", using default 0.01" << std::endl;
         dt = 0.01;
     }
 

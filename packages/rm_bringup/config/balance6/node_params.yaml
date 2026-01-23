@@ -282,7 +282,7 @@
     ballistic.params_found: true
     # ROS2目前不支持加载二维数组，传入string使用yaml-cpp处理
     # 分别五个值分别对应9，15，16，18，30弹速的发射装置与相机的偏移量
-    ballistic.stored_cam2gun_offset: "[
+    ballistic.stored_cam2gun_coffset: "[
     	[0.0, 0.0, 0.0],
   	[0.0, 0.0, 0.0],
   	[0.0, 0.0, 0.0],

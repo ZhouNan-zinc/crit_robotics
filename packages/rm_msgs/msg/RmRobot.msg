@@ -1,3 +1,4 @@
+std_msgs/Header header
 string vision_mode
 float64 height
 float64 z_velocity

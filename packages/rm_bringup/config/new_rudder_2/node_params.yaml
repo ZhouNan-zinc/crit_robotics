@@ -48,7 +48,7 @@
     
 /simple_serial_driver:
   ros__parameters:
-    device_name: /dev/ttyUSB0
+    device_name: /dev/ttyACM0
     baud_rate: 2000000
     flow_control: none
     parity: none
@@ -80,8 +80,8 @@
     target_frame: "odom"
     found_params: true
     # armor_ekf
-    armor_ekf.P: [1.0,1.0,1.0,1.0,1.0,1.0]
-    armor_ekf.Q: [0.025, 0.049, 0.001, 0.01, 0.01, 0.01]
+    armor_ekf.P: [3.0, 3.0, 0.1, 5.0, 5.0, 0.5]
+    armor_ekf.Q: [0.5, 1.0, 0.1, 0.1, 0.8, 0.1]
     armor_ekf.R: [0.00025, 0.00016, 0.0025]
     armor_ekf.Ke: [1.0, 1.2, 1.0]
     armor_ekf.filter_length: 10
@@ -145,17 +145,17 @@
     choose_enemy_without_autoaim_signal: false  #在没有收到右键信号的时候也选择目标（调试用）
     # 延迟参数
     response_delay: 0.08                  #系统延迟(程序+通信+云台响应)
-    shoot_delay: 0.08                     #发弹延迟
+    shoot_delay: 0.28                     #发弹延迟
 
     enemy_radius_cache_reset_time: 45.0
     
-    test_ballistic: false
+    test_ballistic: true
     follow_without_fire: false
 
     # 弹道参数
     # # 分别五个值分别对应9，15，16，18，30弹速的弹道参数
     ballistic.stored_yaw_offset: [0.0, 0.0, 0.0, -0.2, -0.2]
-    ballistic.stored_pitch_offset: [0.0, 0.0, 0.0, -0.8, -0.8] # enemy
+    ballistic.stored_pitch_offset: [0.0, 0.0, -0.4, -0.8, -0.8] # enemy
     # 在stored_pitch_offset的基础上，对低打高和高打低的额外补偿
     pitch_offset_high_hit_low: 0.0
     pitch_offset_low_hit_high: 0.0
