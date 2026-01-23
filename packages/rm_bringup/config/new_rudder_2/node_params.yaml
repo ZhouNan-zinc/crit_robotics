@@ -162,12 +162,16 @@
 
 /outpost_predictor:
   ros__parameters:
-    detection_name: detection_outpost
-    robot_name: rm_robot
+    detection_topic: detection_outpost
+    robot_topic: rm_robot
+    control_topic: "control"
+    image_topic: "hikcam/image_raw"
+    camera_info_topic: "hikcam/camera_info"
     enable_imshow: false
     debug: false
     camera_name: "hkcam"
     target_frame: "odom"
+    camera_frame: "camera_optical_frame"
     found_params: true
     # armor_ekf
     armor_ekf.P: [1.0,1.0,1.0,1.0,1.0,1.0]

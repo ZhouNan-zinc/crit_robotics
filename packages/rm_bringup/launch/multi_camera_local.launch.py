@@ -161,7 +161,7 @@ def generate_launch_description():
                 ),
                 ComposableNode(
                     package="outpost_predictor",
-                    plugin="ngxy_outpost_predictor::OutpostPredictorNode",
+                    plugin="ngxy_outpost_predictor::OutpostNode",
                     name="outpost_predictor",
                     parameters=[node_params, {"pitch2yaw_t": launch_params["pitch2yaw_t"]}],
                     extra_arguments=[{"use_intra_process_comms": True}],

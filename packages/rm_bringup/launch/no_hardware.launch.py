@@ -129,7 +129,7 @@ def generate_launch_description():
                 # ),
                 # ComposableNode(
                 #     package="outpost_predictor",
-                #     plugin="ngxy_outpost_predictor::OutpostPredictorNode",
+                #     plugin="ngxy_outpost_predictor::OutpostNode",
                 #     name="outpost_predictor",
                 #     parameters=ros_parameters,
                 #     extra_arguments=[{"use_intra_process_comms": True}],
