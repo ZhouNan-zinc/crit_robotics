@@ -13,6 +13,7 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Control.msg"
   "msg/State.msg"
+  "msg/TestRecv.msg"
   DEPENDENCIES
   geometry_msgs
 )

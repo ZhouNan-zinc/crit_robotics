@@ -8,8 +8,8 @@ from rosidl_parser.definition import (
     AbstractNestedType,
     Array,
 )
+from rosidl_runtime_py.utilities import get_message
 from rosidl_runtime_py import (
-    get_message,
     message_to_ordereddict,
     set_message_fields
 )
@@ -52,7 +52,7 @@ def parse_url(url):
     return url
 
 
-def fill_message_from_values(msg, values) -> OrderedDict:
+def fill_message_from_values(msg, values):
     it = iter(values)
 
     def fill_message_from_values_impl(node):

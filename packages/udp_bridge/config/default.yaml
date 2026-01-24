@@ -1,8 +1,8 @@
 /udp_bridge:
   ros__parameters:
-    ip_addr: "127.0.0.1"
-    local_port: 6000
-    remote_port: 6000
-    packet_size: 1024
+    local_ip: "192.168.10.50"
+    local_port: 5010
+    remote_ip: "192.168.10.101"
+    remote_port: 62511
     timeout: 1.0
-    url: "package://udp_bridge/config/channels.yaml"
+    url: "package://udp_bridge/config/protocol.yaml"

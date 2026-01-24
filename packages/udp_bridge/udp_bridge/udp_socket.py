@@ -2,6 +2,7 @@ import logging
 import socket
 import selectors
 import threading
+from functools import partial
 
 class UdpSocket:
     BUFSIZE = 65535
@@ -29,13 +30,13 @@ class UdpSocket:
             if self.on_message_callback is None:
                 self.logger.error("Callback not registered.")
                 return
-            
+
             events = sel.select(timeout=self.timeout)
             if not events:
                 continue
             
             for key, _ in events:
-                data, _ = key.fileobj.recvfrom(self.BUFSIZE)
+                data, addr = key.fileobj.recvfrom(self.BUFSIZE)
                 self.on_message_callback(data)
 
     def start(self) -> None:
@@ -66,7 +67,7 @@ class UdpSocket:
 
     def send(self, data: bytes) -> int:
         try:
-            return self.sock.send(data)
+            return self.sock.sendto(data)
         except OSError as e:
             self.logger.error(f"UDP send failed: {e}")
             return 0

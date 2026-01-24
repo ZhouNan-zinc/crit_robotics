@@ -6,7 +6,7 @@ from functools import partial, lru_cache
 from rclpy.logging import RcutilsLogger
 from rclpy.node import Node
 from rclpy.qos import QoSProfile
-from rosidl_runtime_py import get_message
+from rosidl_runtime_py.utilities import get_message
 
 from .protocol import Protocol
 from .rosidl_utils import (
@@ -18,15 +18,19 @@ from .rosidl_utils import (
 from .udp_socket import UdpSocket
 
 class UdpBridgeNodeInterface(Node, ABC):
-    node_name = "udpsocket_python"
+    node_name = "udp_bridge"
     def __init__(self):
-        super().__init__(self.node_name)
+        super().__init__(
+            self.node_name, 
+            automatically_declare_parameters_from_overrides=True
+        )
 
         self.sock = UdpSocket(
-            local_ip=self.get_parameter_or("local_ip", "127.0.0.1").value,
-            local_port=self.get_parameter_or("local_port", 6006).value,
-            remote_ip=self.get_parameter_or("remote_ip", "127.0.0.1").value,
-            remote_port=self.get_parameter_or("remote_port", 6007).value,
+            local_ip=self.get_parameter("local_ip").value,
+            local_port=self.get_parameter("local_port").value,
+            remote_ip=self.get_parameter("remote_ip").value,
+            remote_port=self.get_parameter("remote_port").value,
+            timeout=self.get_parameter("timeout").value,
             logger=self.logger
         )
 
@@ -69,35 +73,37 @@ class UdpBridgeNodeInterface(Node, ABC):
 
     def _init_protocol(self):
         # magic, ver, seq, stamp, message_id
-        self.magic_number = self.get_parameter_or("magic_number", 0xA55A).value
-        self.version = self.get_parameter_or("version", 1).value
         self.sequence_number = 0
 
-        url = parse_url(self.get_parameter_or(
-            "url", f"package://{self.node_name}/config/channels.yaml")).value
-        with open(url, "r", encoding="utf-8") as f:
-            channels = yaml.safe_load(f)
+        with open(parse_url(self.get_parameter("url").value), "r", encoding="utf-8") as f:
+            protocol = yaml.safe_load(f)
+            self.magic_number = protocol["magic_number"]
+            self.version = protocol["version"]
+            self.header_format =  struct.Struct(protocol["header_format"])
+            self.header_size = struct.calcsize(protocol["header_format"])
 
         self.PROTOCOL : list[Protocol] = []
-        for ch in channels:
+        for ch in protocol["channels"]:
             topic_name = ch["topic"]
             msg_id = ch["id"]
-            msg_type = get_message(ch["type"])
             msg_direction = ch["direction"]
-            msg_format = message_type_to_struct_format(msg_type, prefix="!") # big endian
+            msg_type = get_message(ch["type"])
+            msg_format = struct.Struct(
+                message_type_to_struct_format(msg_type, prefix="!")) # big endian
+            
             comm_entity = None
 
             if ch["direction"] == "uplink":
                 comm_entity = self.create_publisher(
                     msg_type,
                     ch["topic"],
-                    QoSProfile()
+                    10
                 )
             elif ch["direction"] == "downlink":
                 comm_entity = self.create_subscription(
                     msg_type,
                     ch["topic"],
-                    QoSProfile(),
+                    10,
                     partial(self.downlink_callback, topic_name=topic_name)
                 )
             else:
@@ -122,16 +128,15 @@ class UdpBridge(UdpBridgeNodeInterface):
 
         stamp = self.get_clock().now().nanoseconds
 
-        header = struct.pack(
-            self.get_parameter_or("header_format", "!HBIQH").value,
+        header = self.header_format.pack(
             self.magic_number,
             self.version,
             self.sequence_number,
             stamp,
             protocol.msg_id
         )
-        
-        payload = struct.pack(protocol.msg_format, *flatten_message_to_values(msg))
+
+        payload = protocol.msg_format.pack(*flatten_message_to_values(msg))
         data = header + payload
 
         self.sock.send(data)
@@ -139,15 +144,14 @@ class UdpBridge(UdpBridgeNodeInterface):
 
     def uplink_callback(self, data, msg_id=None):
         # NOTE: !HBIQH -> big endian, uint16, uint8, uint32, uint64, uint16
-        header_format = self.get_parameter_or("header_format", "!HBIQH").value
-        header_size = struct.calcsize(header_format)
 
-        if len(data) < header_size:
-            self.logger.error("Got unexpected EOF while parsing datapack.")
+        if len(data) < self.header_size:
+            self.logger.error(
+                "Got unexpected EOF while parsing datapack.",
+                throttle_duration_sec=1.0)
             return
-            
-        magic_number, version, sequence_number, timestamp, message_id = struct.unpack_from(
-            header_format,
+
+        magic_number, version, sequence_number, timestamp, message_id = self.header_format.unpack_from(
             buffer=data,
             offset=0
         )
@@ -170,10 +174,9 @@ class UdpBridge(UdpBridgeNodeInterface):
 
         msg = fill_message_from_values(
             protocol.msg_type(),
-            struct.unpack_from(
-                protocol.msg_format,
+            protocol.msg_format.unpack_from(
                 buffer=data,
-                offset=header_size))
+                offset=self.header_size))
         
         publisher = protocol.comm_entity
         publisher.publish(msg)

@@ -1,3 +1,4 @@
+from struct import Struct
 from dataclasses import dataclass
 
 from rclpy.publisher import Publisher
@@ -8,6 +9,6 @@ class Protocol:
     msg_id: int
     topic_name: str
     msg_direction: str
-    msg_format: str
     msg_type: type
+    msg_format: Struct
     comm_entity: Publisher|Subscription

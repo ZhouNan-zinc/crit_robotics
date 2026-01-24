@@ -1,0 +1,11 @@
+magic_number: 0xA55A
+
+version: 1
+
+header_format: "!HBIQH"
+
+channels:
+  - topic: "/test_udp"
+    id: 0
+    type: "rm_msgs/msg/TestRecv"
+    direction: "uplink"
