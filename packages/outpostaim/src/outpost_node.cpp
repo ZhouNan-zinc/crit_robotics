@@ -1,7 +1,9 @@
 #include "outpostaim/outpost_node.h"
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <tf2/LinearMath/Quaternion.h>
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <tf2_ros/create_timer_ros.h>
+#include <cmath>
 
 OutpostNode::OutpostNode(const rclcpp::NodeOptions& options)
     : Node("outpostaim", options),  manager_() {
@@ -18,7 +20,7 @@ OutpostNode::OutpostNode(const rclcpp::NodeOptions& options)
     tf2_buffer->setCreateTimerInterface(timer_interface);
     tf2_listener = std::make_shared<tf2_ros::TransformListener>(*tf2_buffer);
 
-    std::string shared_dir = ament_index_cpp::get_package_share_directory("outpost_predictor");
+    std::string shared_dir = ament_index_cpp::get_package_share_directory("outpostaim");
     RCLCPP_INFO(get_logger(), "shared_dir: %s", shared_dir.c_str());
 
     bac = std::make_shared<Ballistic>(this, shared_dir);
@@ -29,7 +31,10 @@ OutpostNode::OutpostNode(const rclcpp::NodeOptions& options)
     // 初始化manager_.outpost指向outpost_
     manager_.outpost = outpost;
 
-    off_cmd = createControlMsg(0, 0, 0, 0, 0, 15, send_cam_mode(params_.cam_mode));
+    // 注册重投影回调到 manager_，便于在 OutpostManager 中绘制重投影结果
+    manager_.projector = std::bind(&OutpostNode::projectPointToImage, this, std::placeholders::_1);
+
+    off_cmd = createControlMsg(0, 0, 0, 0, 0, 15/*, send_cam_mode(params_.cam_mode)*/);
 
     // 订阅新的检测话题
     detection_sub = this->create_subscription<vision_msgs::msg::Detection2DArray>(
@@ -49,7 +54,7 @@ OutpostNode::OutpostNode(const rclcpp::NodeOptions& options)
     robot_sub = this->create_subscription<RmRobotMsg>(params_.robot_topic, rclcpp::SensorDataQoS(),
         std::bind(&OutpostNode::robotCallback, this, std::placeholders::_1));
 
-    control_pub = this->create_publisher<ControlMsg>(params_.robot_topic + "_control", rclcpp::SensorDataQoS());
+    control_pub = this->create_publisher<ControlMsg>("enemy_predictor", rclcpp::SensorDataQoS());// 暂时叫这个
     
     target_dis_pub = this->create_publisher<std_msgs::msg::Float64>("target_dis", 10);
 
@@ -62,7 +67,7 @@ void OutpostNode::loadAllParams() {
 
     params_.detection_topic = this->declare_parameter("detection_topic", "vision/tracked");
     params_.robot_topic = this->declare_parameter("robot_topic", "rm_robot");
-    params_.control_topic = this->declare_parameter("control_topic", "control");
+    params_.control_topic = this->declare_parameter("control_topic", "control"); // 暂时没用
     params_.image_topic = this->declare_parameter("image_topic", "hikcam/image_raw");
     params_.camera_info_topic = this->declare_parameter("camera_info_topic", "hikcam/camera_info");
     params_.target_frame = this->declare_parameter("target_frame", "odom");
@@ -162,7 +167,10 @@ void OutpostNode::loadAllParams() {
 
     // 配置处理器
     //processor_->setParams(params_.manager_config);
+    // 将节点加载到的参数同步到 manager_，使 OutpostManager 使用相同的参数
+    manager_.params = params_;
 }
+
 
 Eigen::Isometry3d OutpostNode::getTrans(const std::string& source_frame, const std::string& target_frame) {
     
@@ -187,7 +195,64 @@ Eigen::Isometry3d OutpostNode::getTrans(const std::string& source_frame, const s
     transform.rotate(quat);
     
     return transform;
-} 
+}
+
+// Eigen::Isometry3d getTrans(
+//     const std::string& source_frame,
+//     const std::string& target_frame
+// ) {
+//     geometry_msgs::msg::TransformStamped t;
+//     try {
+//         // std::cout<<detection_header_.stamp<<std::endl;
+//         t = tf2_buffer_->lookupTransform(
+//             target_frame,
+//             source_frame,
+//             detection_header_.stamp,
+//             rclcpp::Duration::from_seconds(0.5)
+//         );
+//     } catch (const std::exception& ex) {
+//         printf(
+//             "Could not transform %s to %s: %s",
+//             source_frame.c_str(),
+//             target_frame.c_str(),
+//             ex.what()
+//         );
+//         // sleep(3);
+//         // abort();
+//     }
+//     return tf2::transformToEigen(t);
+// }
+
+Eigen::Vector3d OutpostNode::transPoint(const Eigen::Vector3d& source_point, 
+                                        const std::string& source_frame, 
+                                        const std::string& target_frame) {
+    // 使用 getTrans 返回的变换（从 source_frame 到 target_frame）直接乘以向量
+    try {
+        Eigen::Isometry3d tf = getTrans(source_frame, target_frame);
+        return tf * source_point;
+    } catch (const std::exception &e) {
+        RCLCPP_WARN(get_logger(), "transPoint transform error: %s", e.what());
+        return Eigen::Vector3d::Zero();
+    }
+}
+
+cv::Point2d OutpostNode::projectPointToImage(const Eigen::Vector3d& point_odom) {
+    // 需要相机内参
+    if (manager_.camera_k_.size() < 9) {
+        return cv::Point2d(-1, -1);
+    }
+
+    // 将点从 odom 投影到相机坐标系
+    Eigen::Vector3d p_cam = transPoint(point_odom, "odom", params_.camera_frame);
+    if (p_cam[2] <= 1e-6) return cv::Point2d(-1, -1);
+
+    Eigen::Matrix3d K;
+    for (int i = 0; i < 9; ++i) K(i / 3, i % 3) = manager_.camera_k_[i];
+
+    Eigen::Vector3d proj = K * p_cam;
+    proj /= proj[2];
+    return cv::Point2d(proj[0], proj[1]);
+}
 
 bool OutpostNode::transformPoseToOdom(const geometry_msgs::msg::Pose& pose_camera, 
                                               const std_msgs::msg::Header& header,
@@ -216,7 +281,7 @@ bool OutpostNode::convertCameraToOdom(const Eigen::Vector3d& pos_camera,
     try {
         // 将Eigen类型转换为ROS类型
         geometry_msgs::msg::PoseStamped pose_camera_stamped;
-        pose_camera_stamped.header.frame_id = "camera_optical_frame";
+    pose_camera_stamped.header.frame_id = params_.camera_frame;
         pose_camera_stamped.header.stamp = rclcpp::Time(0);
         
         pose_camera_stamped.pose.position.x = pos_camera.x();
@@ -303,6 +368,8 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
     // }
 
 
+    
+
     // 检查相机信息是否已接收
     if (!camera_info_received_) {
         RCLCPP_WARN(get_logger(), "Camera info not received yet, skipping detection");
@@ -316,19 +383,19 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
     // 从机器人消息获取当前模式
     if (!manager_.robot.vision_mode.empty()) {
         params_.mode = string2vision_mode(manager_.robot.vision_mode);
-        RCLCPP_DEBUG(get_logger(), "Received vision mode: %s", manager_.robot.vision_mode.c_str());
+        // RCLCPP_INFO(get_logger(), "Received vision mode: %s", manager_.robot.vision_mode.c_str());
     } else {
         params_.mode = VisionMode::AUTO_AIM;
         RCLCPP_WARN(get_logger(), "No vision mode in robot message, using default AUTO_AIM");
     }
     // 从机器人消息获取右键状态
     params_.right_press = manager_.robot.right_press;
-    RCLCPP_DEBUG(get_logger(), "Right press state: %d", params_.right_press);
+    // RCLCPP_INFO(get_logger(), "Right press state: %d", params_.right_press);
     
     // 从机器人消息获取机器人ID
     if (manager_.robot.robot_id > 0) {
         params_.robot_id = static_cast<RobotIdDji>(manager_.robot.robot_id);
-        RCLCPP_DEBUG(get_logger(), "Robot ID: %d", manager_.robot.robot_id);
+        // RCLCPP_INFO(get_logger(), "Robot ID: %d", manager_.robot.robot_id);
     } else {
         RCLCPP_WARN(get_logger(), "Invalid robot ID: %d", manager_.robot.robot_id);
     }
@@ -338,40 +405,40 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
     
     // 检查模式是否有效
     if (params_.mode != VisionMode::OUTPOST_AIM && params_.mode != VisionMode::AUTO_AIM) {
-        RCLCPP_DEBUG(get_logger(), "Not in OUTPOST_AIM or AUTO_AIM mode, skipping processing");
+        RCLCPP_INFO(get_logger(), "Not in OUTPOST_AIM or AUTO_AIM mode, skipping processing");
         return;
     }
     // 从机器人消息获取弹速并更新弹道 是否重复了？
     bool is_big_bullet = false;
     if (manager_.robot.bullet_velocity > 8.0) {
         is_big_bullet = params_.rmcv_id.robot_id == RobotId::ROBOT_HERO;
-        RCLCPP_DEBUG(get_logger(), "Bullet velocity updated: %.2f m/s", manager_.robot.bullet_velocity);
+        // RCLCPP_INFO(get_logger(), "Bullet velocity updated: %.2f m/s", manager_.robot.bullet_velocity);
     } else {
-        manager_.robot.bullet_velocity = is_big_bullet ? 15.5 : 25.5;
-        RCLCPP_WARN(get_logger(), "Invalid bullet velocity: %.2f", manager_.robot.bullet_velocity);
+        manager_.robot.bullet_velocity = is_big_bullet ? 12.0 : 22.0;
+        // RCLCPP_WARN(get_logger(), "Invalid bullet velocity: %.2f", manager_.robot.bullet_velocity);
     }
     bac->refresh_velocity(is_big_bullet, manager_.robot.bullet_velocity);
 
     // 从机器人消息获取相机切换状态
     if (manager_.robot.switch_cam) {
-        RCLCPP_DEBUG(get_logger(), "Camera switch requested");
+        RCLCPP_INFO(get_logger(), "Camera switch requested");
         // 这里可以添加相机切换逻辑
     }
     
     // 从机器人消息获取自动射击率
     if (manager_.robot.autoshoot_rate > 0) {
-        RCLCPP_DEBUG(get_logger(), "Auto shoot rate: %d", manager_.robot.autoshoot_rate);
+        // RCLCPP_INFO(get_logger(), "Auto shoot rate: %d", manager_.robot.autoshoot_rate);
     }
     
     // 从机器人消息获取高度和z速度
-    RCLCPP_DEBUG(get_logger(), "Robot height: %.2f m, Z velocity: %.2f m/s", 
-                manager_.robot.height, manager_.robot.z_velocity);
+    // RCLCPP_INFO(get_logger(), "Robot height: %.2f m, Z velocity: %.2f m/s", 
+    //             manager_.robot.height, manager_.robot.z_velocity);
     
     // 从机器人消息获取IMU数据
-    RCLCPP_DEBUG(get_logger(), "IMU - Pitch: %.2f, Yaw: %.2f, Roll: %.2f", 
-                manager_.robot.imu.pitch, manager_.robot.imu.yaw, manager_.robot.imu.roll);
+    // RCLCPP_INFO(get_logger(), "IMU - Pitch: %.2f, Yaw: %.2f, Roll: %.2f", 
+    //             manager_.robot.imu.pitch, manager_.robot.imu.yaw, manager_.robot.imu.roll);
 
-    off_cmd.cam_mode = send_cam_mode(params_.cam_mode); // ??哪来的
+    //off_cmd.cam_mode = send_cam_mode(params_.cam_mode); // ??哪来的
     off_cmd.flag = 0;
     // 清空之前的检测结果
     std::vector<TrackedArmor> tracked_armors;
@@ -395,12 +462,26 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
             pose_camera.position.z
         );
         
-        Eigen::Quaterniond ori_camera(
-            pose_camera.orientation.w,
-            pose_camera.orientation.x,
-            pose_camera.orientation.y,
-            pose_camera.orientation.z
-        );
+        // 注意：当前上游把 orientation.xyz 填成了 camera 系下的 RPY（rad），且 w 恒为 1.0
+        // 这里需要先把 RPY 还原成四元数，再交给 tf2 做坐标系转换。
+        const double ow = pose_camera.orientation.w;
+        const double ox = pose_camera.orientation.x;
+        const double oy = pose_camera.orientation.y;
+        const double oz = pose_camera.orientation.z;
+
+        Eigen::Quaterniond ori_camera;
+        if (std::abs(ow - 1.0) < 1e-3) {
+            const double roll = ox;
+            const double pitch = oy;
+            const double yaw = oz;
+            tf2::Quaternion q;
+            q.setRPY(roll, pitch, yaw);
+            q.normalize();
+            ori_camera = Eigen::Quaterniond(q.w(), q.x(), q.y(), q.z());
+        } else {
+            ori_camera = Eigen::Quaterniond(ow, ox, oy, oz);
+            ori_camera.normalize();
+        }
         
         // 转换到odom系
         Eigen::Vector3d pos_odom;
@@ -409,7 +490,7 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
         if (convertCameraToOdom(pos_camera, ori_camera, pos_odom, ori_odom)) {
             armor.setOdomPose(pos_odom, ori_odom);
             
-            RCLCPP_DEBUG(get_logger(), "Armor %d: camera (%.3f, %.3f, %.3f) -> odom (%.3f, %.3f, %.3f)",
+            RCLCPP_INFO(get_logger(), "Armor %d: camera (%.3f, %.3f, %.3f) -> odom (%.3f, %.3f, %.3f)",
                         armor.id,
                         pos_camera.x(), pos_camera.y(), pos_camera.z(),
                         pos_odom.x(), pos_odom.y(), pos_odom.z());
@@ -420,10 +501,9 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
         }
     }
     
-    // 如果没有成功变换的装甲板，直接返回
+    // 允许短时间无装甲板：仍然更新管理器以便处理Absent/超时/状态机
     if (tracked_armors.empty()) {
         RCLCPP_WARN(get_logger(), "No armor successfully transformed to odom frame");
-        return;
     }
 
     // 更新管理器
@@ -443,16 +523,18 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
     now_cmd.header.stamp = detection_msg->header.stamp;
     control_pub->publish(now_cmd);
 
-    // 可视化
+        // 可视化 暂时看一下
     if (params_.enable_imshow && !current_image_.empty()) {
         cv::Mat vis_img = manager_.getVisualizationImage();
         if (!vis_img.empty()) {
             cv::imshow("Outpost Predictor", vis_img);
             cv::waitKey(1);
+             RCLCPP_WARN(get_logger(), "Image");
+        } else {
+            RCLCPP_WARN(get_logger(), "Image empty!!!");
         }
     }
 
-    
 }
 
 void OutpostNode::robotCallback(RmRobotMsg::SharedPtr robot_msg){
@@ -465,6 +547,11 @@ void OutpostNode::robotCallback(RmRobotMsg::SharedPtr robot_msg){
         RCLCPP_INFO(this->get_logger(), "Reset-Outpost");
         manager_.outpost = Outpost();
         manager_.outpost.alive_ts = -1;
+        manager_.phase_initialized_ = false;
+        manager_.last_active_tracker_id_ = -1;
+        manager_.last_active_phase_ = -1;
+        manager_.last_active_yaw_ = 0.0;
+        manager_.last_active_ts_ = -1.0;
     }
     imu = manager_.robot.imu;
 
@@ -473,7 +560,7 @@ void OutpostNode::robotCallback(RmRobotMsg::SharedPtr robot_msg){
     if (robot_msg->bullet_velocity > 8.) {
         is_big_bullet = params_.rmcv_id.robot_id == RobotId::ROBOT_HERO;
     }else {
-        double bullet_velocity = is_big_bullet ? 15.5 : 25.5;
+        double bullet_velocity = is_big_bullet ? 12.0 : 22.0;
     }
     bac->refresh_velocity(is_big_bullet, robot_msg->bullet_velocity);
 }

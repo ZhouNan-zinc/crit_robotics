@@ -160,14 +160,14 @@
     pitch_offset_high_hit_low: 0.0
     pitch_offset_low_hit_high: 0.0
 
-/outpost_predictor:
+/outpostaim:
   ros__parameters:
-    detection_topic: detection_outpost
+    detection_topic: vision/tracked
     robot_topic: rm_robot
-    control_topic: "control"
-    image_topic: "hikcam/image_raw"
-    camera_info_topic: "hikcam/camera_info"
-    enable_imshow: false
+    control_topic: control
+    image_topic: hikcam/image_raw
+    camera_info_topic: hikcam/camera_info
+    enable_imshow: true
     debug: false
     camera_name: "hkcam"
     target_frame: "odom"
@@ -229,6 +229,11 @@
     # 延迟参数
     response_delay: 0.05                  #系统延迟(程序+通信+云台响应)
     shoot_delay: 0.08                     #发弹延迟
+    gimbal_adjust_delay: 0.3              # 云台调整延迟时间（秒）
+
+    # 前哨站装甲板高度观测系统参数
+    height_tolerance: 0.05  # 高度容差阈值（米）+-范围
+    hero_fixed_armor_id: 0
     
     # 弹道参数
     # # 分别五个值分别对应9，15，16，18，30弹速的弹道参数

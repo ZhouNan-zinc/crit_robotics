@@ -162,7 +162,7 @@ def generate_launch_description():
                 ),
                 ComposableNode(
                     package="outpost_predictor",
-                    plugin="outpost_predictor::OutpostNode",
+                    plugin="outpost_predictor::OutpostPredictorNode",
                     name="outpost_predictor",
                     parameters=ros_parameters,
                     extra_arguments=[{"use_intra_process_comms": True}],

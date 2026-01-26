@@ -144,7 +144,7 @@ public:
             vy = _vy;
             omega = _omega;
         }
-        State(Vx _x_vec){
+        State(const Eigen::Ref<const Vx> &_x_vec){
             fromVx(_x_vec);
         }
 
@@ -152,7 +152,7 @@ public:
             return Vx(x, vx, y, vy, yaw, omega);
         }
 
-        void fromVx(Vx _x_vec){
+        void fromVx(const Eigen::Ref<const Vx> &_x_vec){
             x = _x_vec[0];
             vx = _x_vec[1];
             y = _x_vec[2];
@@ -175,7 +175,7 @@ public:
             z = _z;
             yaw = _yaw;
         }
-        Observe(Vz _z_vec){
+        Observe(const Eigen::Ref<const Vz> &_z_vec){
             fromVz(_z_vec);
         }
 
@@ -183,7 +183,7 @@ public:
             return Vz(x, y, z, yaw);
         }
 
-        void fromVz(Vz _z_vec){
+        void fromVz(const Eigen::Ref<const Vz> &_z_vec){
             x = _z_vec[0];
             y = _z_vec[1];
             z = _z_vec[2];
@@ -216,12 +216,12 @@ public:
     inline static OutpostCkfConfig config_;
 
 
-    Vx f(Vx _x, double _dt) const; // 预测函数
+    Vx f(const Eigen::Ref<const Vx> &_x, double _dt) const; // 预测函数
 
 
-    Vz h(Vx _x, int phase_id, double armor_height) const;
+    Vz h(const Eigen::Ref<const Vx> &_x, int phase_id, double armor_height) const;
 
-    void SRCR_sampling_3(Vx _x, Mxx _P);  // 3阶球面——径向采样法
+    void SRCR_sampling_3(const Eigen::Ref<const Vx> &_x, const Mxx &_P);  // 3阶球面——径向采样法
 
     void calcQ(double _dt);
 
@@ -239,7 +239,7 @@ public:
     std::vector<Vx> samples_;      // 样本数组
     std::vector<double> weights_;  // 权重数组
     State state_;
-    Eigen::VectorXd Xe;  // 状态量 x vx y vy yaw omega
+    Vx Xe;  // 状态量 x vx y vy yaw omega
     // 自适应参数
     Vx Xp;
     Mxx Pp;

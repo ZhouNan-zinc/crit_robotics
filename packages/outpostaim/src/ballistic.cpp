@@ -172,10 +172,10 @@ void Ballistic::refresh_velocity(bool isBig, double velocity){
 Ballistic::BallisticResult Ballistic::final_ballistic(Eigen::Vector3d p){
 
     double x = sqrt(p[0] * p[0] + p[1] * p[1]), y = p[2];
-    RCLCPP_INFO(rclcpp::get_logger("Ballestic"), "final_ballistic: x:%lf y:%lf", x, y);
+    // RCLCPP_INFO(rclcpp::get_logger("Ballestic"), "final_ballistic: x:%lf y:%lf", x, y);
     auto [pitch, t] = table_ballistic(
         pTable, sqrt(x * x - params.yaw2gun_offset * params.yaw2gun_offset), y + cam2gun_offset[2]);
-    RCLCPP_INFO(rclcpp::get_logger("Ballestic: t"), "final_ballistic: t:%lf", t);
+    // RCLCPP_INFO(rclcpp::get_logger("Ballestic: t"), "final_ballistic: t:%lf", t);
     if (t < 0) return BallisticResult();
     double yaw = atan2(p[1], p[0]);
     return BallisticResult(-pitch + deg2rad(pitch_offset),

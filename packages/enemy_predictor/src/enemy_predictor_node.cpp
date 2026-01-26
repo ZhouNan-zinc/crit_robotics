@@ -13,7 +13,7 @@ EnemyPredictorNode::EnemyPredictorNode(const rclcpp::NodeOptions& options)
     tf2_listener = std::make_shared<tf2_ros::TransformListener>(*tf2_buffer);
 
     detector_sub=create_subscription<vision_msgs::msg::Detection2DArray>(
-        "/vision/raw", rclcpp::QoS(10), std::bind(&EnemyPredictorNode::detection_callback, this, std::placeholders::_1));
+        "/vision/tracked", rclcpp::QoS(10), std::bind(&EnemyPredictorNode::detection_callback, this, std::placeholders::_1));
     //取决于电控给我发消息的频率, 要适配 HighFrequencyCallback()
     imu_sub=create_subscription<rm_msgs::msg::RmRobot>(
         "rm_robot", rclcpp::SensorDataQoS(), std::bind(&EnemyPredictorNode::robot_callback, this, std::placeholders::_1));
@@ -253,8 +253,9 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
             continue;
         }
         Detection det;
-        //det.armor_idx = std::stoi(detection.id);
-        det.armor_idx = 0;
+        det.armor_idx = std::stoi(detection.id);
+        RCLCPP_INFO(get_logger(), "armor_idx = %d", det.armor_idx);
+        //det.armor_idx = 0;
         
         const auto& results_ = detection.results;
         for(const auto& res : results_){
@@ -285,12 +286,6 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
     //if (params_.mode != VisionMode::AUTO_AIM) {
      //    return;
      //}
-     double area_2d_ = 0.0;
-     for(const auto& det_ : current_detections_){
-        if(det_.area_2d > area_2d_){
-            current_detections_[0] = det_;
-        }
-     }
     ToupdateArmors(current_detections_, timestamp);
     EnemyManage(timestamp, time_image);
     if (cmd.aim_center.x() != -999){

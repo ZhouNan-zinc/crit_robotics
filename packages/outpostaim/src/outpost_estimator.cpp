@@ -2,6 +2,11 @@
 #include "outpostaim/outpost_node.h"
 #include <cmath>
 
+Eigen::Vector3d operator*(const Eigen::Isometry3d &T, const Eigen::Vector3d &v) {
+    Eigen::Vector4d V(v[0], v[1], v[2], 1);
+    return (T * V).block<3, 1>(0, 0);
+}
+
 //——————————————————————————————————————Armor状态————————————————————————————————————————
 
 void OutpostArmor::init(const ArmorPoseResult &pc_result, double _timestamp){
@@ -17,9 +22,9 @@ void OutpostArmor::init(const ArmorPoseResult &pc_result, double _timestamp){
     last_yaw_ = new_pyd[1];
     last_ori_yaw_ = new_pyd[1];
 
-    phase_in_outpost_ = -1;  // -1表示未分配ID
+    // phase_in_outpost_ = -1;  // -1表示未分配ID
     
-    // NGXY_DEBUG("OutpostArmor init: height=%.3f, ID not assigned yet", xyz[2]);
+    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "OutpostArmor init, ID not assigned yet");
     
     armor_kf_.init(new_pyd, _timestamp);
 
@@ -93,21 +98,20 @@ Outpost::Outpost(ArmorId _id, bool _outpost_kf_init, bool _in_follow, int _armor
 // 更新装甲板高度
 void Outpost::update_armor_height(int armor_id, double observed_height){
     if (armor_id < 0 || armor_id >= 3) {
-        // NGXY_WARN("Invalid armor_id %d for height update", armor_id);
+        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Invalid armor_id %d for height update", armor_id);
         return;
     }
     // 使用MathFilter进行滤波
     armor_height_filter[armor_id].update(observed_height);
     armor_heights_[armor_id] = armor_height_filter[armor_id].get();
     
-    // NGXY_DEBUG("Updated armor %d height: observed=%.3f, filtered=%.3f", 
-              // armor_id, observed_height, armor_heights_[armor_id]);
+    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Updated armor %d height: observed=%.3f, filtered=%.3f", armor_id, observed_height, armor_heights_[armor_id]);
 }
 
 // 获取装甲板高度
 double Outpost::get_armor_height_by_id(int armor_id){
     if (armor_id < 0 || armor_id >= 3) {
-        // NGXY_ERROR("Invalid armor_id: %d, using default height", armor_id);
+        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Invalid armor_id: %d, using default height", armor_id);
         // 返回默认高度
         return 1.516;
     }
@@ -118,6 +122,8 @@ double Outpost::get_armor_height_by_id(int armor_id){
     // 其他情况返回默认高度
     return 1.516;
 }
+
+// 是否要判断两块装甲板是否属于同一辆车？但是前哨站只有一个。。。
 
 // void Outpost::add_armor(OutpostArmor armor){
 //     static std::vector<int> alive_indexs(armor_cnt);
@@ -225,7 +231,8 @@ Outpost::OutpostPosition Outpost::predict_positions(double _timestamp){
             // 使用实际装甲板高度
             armor_height = get_armor_height_by_id(i);
         }
-        OutpostCkf::Observe observe_pre(op_ckf.h(state_pre.toVx(), i, armor_height));
+        OutpostCkf::Vx tmp_state_vec = state_pre.toVx();
+        OutpostCkf::Observe observe_pre(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(tmp_state_vec), i, armor_height));
         result.armors_xyz_[i] = Eigen::Vector3d(observe_pre.x, observe_pre.y, observe_pre.z);
         result.armor_yaws_[i] = observe_pre.yaw + i * op_ckf.angle_dis_;
     }
@@ -249,18 +256,18 @@ void Outpost::reset(const OutpostCkf::Observe &_observe, int _phase_id, int _arm
     for (int i = 0; i < armor_cnt; ++i) {
         // 使用实际装甲板高度
         double armor_height = get_armor_height_by_id(i);
-        OutpostCkf::Observe observe(op_ckf.h(op_ckf.Xe, i, armor_height));
+        OutpostCkf::Observe observe(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(op_ckf.Xe), i, armor_height));
 
         now_position_.armors_xyz_[i] = Eigen::Vector3d(observe.x, observe.y, observe.z);
         now_position_.armor_yaws_[i] = observe.yaw + i * op_ckf.angle_dis_;
     }
-    // NGXY_INFO("Outpost reset: phase=%d, armor_cnt=%d", _phase_id, armor_cnt);
+    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Outpost reset: phase=%d, armor_cnt=%d", _phase_id, armor_cnt);
 }
 
 void Outpost::update(OutpostCkf::Observe _observe, double _timestamp, int _phase_id){
     // 安全检查
     if (_phase_id < 0 || _phase_id >= armor_cnt) {
-        // NGXY_WARN("Invalid phase_id %d in outpost update", _phase_id);
+        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Invalid phase_id %d in outpost update", _phase_id);
         return;
     }
 
@@ -280,7 +287,7 @@ void Outpost::update(OutpostCkf::Observe _observe, double _timestamp, int _phase
     for (int i = 0; i < armor_cnt; ++i) {
 
         double armor_height = get_armor_height_by_id(i);
-        OutpostCkf::Observe observe(op_ckf.h(op_ckf.Xe, i, armor_height));
+        OutpostCkf::Observe observe(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(op_ckf.Xe), i, armor_height));
 
         now_position_.armors_xyz_[i] = Eigen::Vector3d(observe.x, observe.y, observe.z);
         now_position_.armor_yaws_[i] = observe.yaw + i * op_ckf.angle_dis_;
@@ -319,11 +326,11 @@ void OutpostCkf::reset(const Observe &_observe, int phase_id, int _armor_cnt, do
 
 void OutpostCkf::CKF_update(Observe _observe, double _timestamp, int _phase_id){
     double dT = _timestamp - last_timestamp_;
-    // // NGXY_DEBUG("OutpostCKF update: dT=%.4f, phase_id=%d", dT, _phase_id);
+    // // NGXY_INFO("OutpostCKF update: dT=%.4f, phase_id=%d", dT, _phase_id);
     Xe = state_.toVx();
     Vz z = _observe.toVz();
     CKF_predict(dT);
-    SRCR_sampling_3(Xp, Pp);
+    SRCR_sampling_3(Eigen::Ref<const OutpostCkf::Vx>(Xp), Pp);
     CKF_measure(z, _phase_id, _observe.z);
     CKF_correct(z);
     last_timestamp_ = _timestamp;
@@ -331,7 +338,8 @@ void OutpostCkf::CKF_update(Observe _observe, double _timestamp, int _phase_id){
 
 OutpostCkf::State OutpostCkf::predictState(double _timestamp){
     State ans;
-    ans.fromVx(f(Xe, _timestamp - last_timestamp_));
+    OutpostCkf::Vx tmp = f(Eigen::Ref<const OutpostCkf::Vx>(Xe), _timestamp - last_timestamp_);
+    ans.fromVx(tmp);
     ans.z = const_z_;
     return ans;
 }
@@ -344,7 +352,7 @@ Eigen::Vector3d OutpostCkf::get_center(){
     return Eigen::Vector3d(state_.x, state_.y, const_z_);
 }
 
-OutpostCkf::Vx OutpostCkf::f(Vx _x, double _dt) const{
+OutpostCkf::Vx OutpostCkf::f(const Eigen::Ref<const OutpostCkf::Vx> &_x, double _dt) const{
     Vx ans = _x;// x vx y vy yaw omega
     ans[0] += _x[1] * _dt;
     ans[2] += _x[3] * _dt;
@@ -352,7 +360,7 @@ OutpostCkf::Vx OutpostCkf::f(Vx _x, double _dt) const{
     return ans;
 }
 
-OutpostCkf::Vz OutpostCkf::h(Vx _x, int _phase_id, double armor_height) const{
+OutpostCkf::Vz OutpostCkf::h(const Eigen::Ref<const OutpostCkf::Vx> &_x, int _phase_id, double armor_height) const{
     State X_state;
     X_state.fromVx(_x);
     Observe ans;
@@ -366,7 +374,7 @@ OutpostCkf::Vz OutpostCkf::h(Vx _x, int _phase_id, double armor_height) const{
 
 }
 
-void OutpostCkf::SRCR_sampling_3(Vx _x, Mxx _P){
+void OutpostCkf::SRCR_sampling_3(const Eigen::Ref<const OutpostCkf::Vx> &_x, const Mxx &_P){
     double sqrtn = sqrt(state_num);
     double weight = 1.0 / (2 * state_num);
     Eigen::LLT<Eigen::MatrixXd> get_S(_P);
@@ -405,7 +413,7 @@ void OutpostCkf::calcR(Vz _z){
 
 void OutpostCkf::CKF_predict(double _dt){
     calcQ(_dt);
-    SRCR_sampling_3(Xe, Pe);
+    SRCR_sampling_3(Eigen::Ref<const OutpostCkf::Vx>(Xe), Pe);
     Xp = Vx::Zero();
     for (int i = 0; i < sample_num_; ++i) {
         sample_X[i] = f(samples_[i], _dt);
@@ -447,7 +455,7 @@ void OutpostCkf::CKF_correct(Vz _z){
     Xe = Xp + K * (_z - Zp);
     Pe = Pp - K * Pzz * K.transpose();
 
-    state_.fromVx(Xe);
+    state_.fromVx(Eigen::Ref<const OutpostCkf::Vx>(Xe));
     state_.z = const_z_;
 }
 //--------------------------OutpostCkf------------------------------------------

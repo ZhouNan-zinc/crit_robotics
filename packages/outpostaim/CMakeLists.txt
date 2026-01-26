@@ -57,7 +57,7 @@ target_link_libraries(
 )
 
 rclcpp_components_register_node(${PROJECT_NAME}
-  PLUGIN EnemyPredictorNode
+  PLUGIN OutpostNode
   EXECUTABLE ${PROJECT_NAME}_node
 )
 

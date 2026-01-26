@@ -20,6 +20,7 @@
 #include "outpostaim/datatypes.h"
 #include "outpostaim/filter.h"
 #include "outpostaim/math_utils.h"
+#include <functional>
 
 typedef rm_msgs::msg::Control ControlMsg;
 typedef rm_msgs::msg::RmImu RmImuMsg;
@@ -28,7 +29,7 @@ typedef rm_msgs::msg::State StateMsg;
 typedef vision_msgs::msg::Detection2DArray DetectionMsg;  // 添加类型别名
 
 inline ControlMsg createControlMsg(float _pitch, float _yaw, uint8_t _flag, uint8_t _one_shot_num, uint8_t _rate,
-             uint8_t _vision_follow_id, uint8_t _cam_mode){
+             uint8_t _vision_follow_id/*, uint8_t _cam_mode*/){
     ControlMsg now;
     now.pitch = (float)_pitch;
     now.yaw = (float)_yaw;
@@ -36,8 +37,34 @@ inline ControlMsg createControlMsg(float _pitch, float _yaw, uint8_t _flag, uint
     now.one_shot_num = _one_shot_num;
     now.rate = _rate;
     now.vision_follow_id = _vision_follow_id;
-    now.cam_mode = _cam_mode;
+    //now.cam_mode = _cam_mode;
     return now;
+}
+
+
+inline VisionMode string2vision_mode(const std::string& mode_str){
+    if (mode_str == "NO_AIM")
+        return NO_AIM;
+    else if (mode_str == "AUTO_AIM")
+        return AUTO_AIM;
+    else if (mode_str == "OUTPOST_AIM")
+        return OUTPOST_AIM;
+    else if (mode_str == "OUTPOST_LOB")
+        return OUTPOST_LOB;
+    else if (mode_str == "S_WM")
+        return S_WM;
+    else if (mode_str == "B_WM")
+        return B_WM;
+    else if (mode_str == "LOB")
+        return LOB;
+    else if (mode_str == "HALT")
+        return HALT;
+    else if (mode_str == "AUTOLOB")
+        return AUTOLOB;
+    else if (mode_str == "Unknown")
+        return Unknown;
+    else
+        return Unknown;
 }
 
 // 简化装甲板信息结构，从新识别节点接收
@@ -215,8 +242,8 @@ public:
     
     int vote_cnt_ = 1;                       // 摩尔投票计数
     bool matched_ = false;  // 帧间匹配标志位（这个可以不用放在类里面）
-    
-    int phase_in_outpost_ = -1; //装甲板id初始化为-1，表示未分配ID
+    int tracker_id = -1;  // 添加：Tracker ID，用于帧间匹配，不用于相位分配
+    int phase_in_outpost_ = -1; // 装甲板id初始化为-1，表示未分配ID
     ArmorPoseResult pc_result_;  // 滤波前位姿
     double yaw_dis_predict_; 
     OutpostArmorEkf armor_kf_;
@@ -356,10 +383,19 @@ public:
     cv::Mat result_img_;
     std::vector<double> camera_k_;
     std::vector<double> camera_d_;
+    // 可注册的重投影函数，由 OutpostNode 构造时注入
+    std::function<cv::Point2d(const Eigen::Vector3d&)> projector;
 
     // 上一帧装甲板信息（用于过中检测）
     std::map<int, TrackedArmor> last_frame_armors_;
     double last_frame_timestamp_ = -1.0;
+
+    // 相位分配状态：仅在前哨站自瞄启动后第一块装甲板初始化为0
+    bool phase_initialized_ = false;
+    int last_active_tracker_id_ = -1;
+    int last_active_phase_ = -1;
+    double last_active_yaw_ = 0.0;
+    double last_active_ts_ = -1.0;
 
 };
 
@@ -423,6 +459,12 @@ private:
                            const Eigen::Quaterniond& ori_camera,
                            Eigen::Vector3d& pos_odom,
                            Eigen::Quaterniond& ori_odom);
+
+                           // 在 OutpostNode 类中添加：
+    cv::Point2d projectPointToImage(const Eigen::Vector3d& point_odom);
+    Eigen::Vector3d transPoint(const Eigen::Vector3d& source_point, 
+                            const std::string& source_frame, 
+                            const std::string& target_frame);
 
     Ballistic::BallisticResult center_ballistic(Eigen::Vector3d &predict_center, double armor_z);
     Ballistic::BallisticResult calc_ballistic(int armor_phase, double delay, Eigen::Vector3d &predict_pos, double armor_height);

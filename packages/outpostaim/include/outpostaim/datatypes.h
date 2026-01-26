@@ -31,7 +31,7 @@ enum VisionMode {
 
 VisionMode get_vision_mode(uint8_t mode);
 
-VisionMode string2vision_mode(const std::string& str);
+// VisionMode string2vision_mode(const std::string& str);
 
 std::string vision_mode2string(VisionMode mode);
 
