@@ -457,6 +457,7 @@ private:
     // 将相机系下的位姿转换到odom系
     bool convertCameraToOdom(const Eigen::Vector3d& pos_camera,
                            const Eigen::Quaterniond& ori_camera,
+                           const builtin_interfaces::msg::Time& stamp,
                            Eigen::Vector3d& pos_odom,
                            Eigen::Quaterniond& ori_odom);
 

@@ -276,13 +276,14 @@ bool OutpostNode::transformPoseToOdom(const geometry_msgs::msg::Pose& pose_camer
 
 bool OutpostNode::convertCameraToOdom(const Eigen::Vector3d& pos_camera,
                                              const Eigen::Quaterniond& ori_camera,
+                                             const builtin_interfaces::msg::Time& stamp,
                                              Eigen::Vector3d& pos_odom,
                                              Eigen::Quaterniond& ori_odom) {
     try {
         // 将Eigen类型转换为ROS类型
         geometry_msgs::msg::PoseStamped pose_camera_stamped;
-    pose_camera_stamped.header.frame_id = params_.camera_frame;
-        pose_camera_stamped.header.stamp = rclcpp::Time(0);
+        pose_camera_stamped.header.frame_id = params_.camera_frame;
+        pose_camera_stamped.header.stamp = stamp;
         
         pose_camera_stamped.pose.position.x = pos_camera.x();
         pose_camera_stamped.pose.position.y = pos_camera.y();
@@ -487,7 +488,7 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
         Eigen::Vector3d pos_odom;
         Eigen::Quaterniond ori_odom;
         
-        if (convertCameraToOdom(pos_camera, ori_camera, pos_odom, ori_odom)) {
+        if (convertCameraToOdom(pos_camera, ori_camera, detection_msg->header.stamp, pos_odom, ori_odom)) {
             armor.setOdomPose(pos_odom, ori_odom);
             
             RCLCPP_INFO(get_logger(), "Armor %d: camera (%.3f, %.3f, %.3f) -> odom (%.3f, %.3f, %.3f)",

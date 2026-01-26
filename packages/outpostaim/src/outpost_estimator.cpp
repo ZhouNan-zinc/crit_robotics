@@ -232,6 +232,7 @@ Outpost::OutpostPosition Outpost::predict_positions(double _timestamp){
             armor_height = get_armor_height_by_id(i);
         }
         OutpostCkf::Vx tmp_state_vec = state_pre.toVx();
+        // 与CKF几何模型保持一致：yaw 表示 0 号装甲板相位角，其他装甲板按 +i*angle_dis_ 递增
         OutpostCkf::Observe observe_pre(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(tmp_state_vec), i, armor_height));
         result.armors_xyz_[i] = Eigen::Vector3d(observe_pre.x, observe_pre.y, observe_pre.z);
         result.armor_yaws_[i] = observe_pre.yaw + i * op_ckf.angle_dis_;
