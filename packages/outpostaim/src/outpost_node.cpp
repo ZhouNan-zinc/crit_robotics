@@ -471,12 +471,22 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
         const double oz = pose_camera.orientation.z;
 
         Eigen::Quaterniond ori_camera;
-        if (std::abs(ow - 1.0) < 1e-3) {
-            const double roll = ox;
-            const double pitch = oy;
-            const double yaw = oz;
+        // 兼容 imagepipe 发来的 w=0 和其他节点可能的 w=1 的 RPY 编码情况
+        if (std::abs(ow - 1.0) < 1e-3 || std::abs(ow) < 1e-3) {
+            // imagepipe 发送的 orientation 顺序为 [roll, pitch, yaw]
+            // ox(roll) 对应绕 Z 轴旋转 (光轴)
+            // oy(pitch) 对应绕 X 轴旋转 (水平)
+            // oz(yaw) 对应绕 Y 轴旋转 (垂直)
+            // tf2::setRPY(r, p, y) 对应绕固定轴 X, Y, Z 的旋转
+            // 恢复直接映射：imagepipe 的 RPY 定义与 Camera Optical Frame 的轴向旋转定义一致。
+            // 坐标系的变换 (Camera -> Odom) 会自动处理手性/方向的翻转。
+            // 配合 outpost_processor 中已恢复的“使用法向量计算 Yaw”逻辑，这将产生正确的结果。
+            const double rot_x = oy; // pitch
+            const double rot_y = oz; // yaw
+            const double rot_z = ox; // roll
+            
             tf2::Quaternion q;
-            q.setRPY(roll, pitch, yaw);
+            q.setRPY(rot_x, rot_y, rot_z);
             q.normalize();
             ori_camera = Eigen::Quaterniond(q.w(), q.x(), q.y(), q.z());
         } else {

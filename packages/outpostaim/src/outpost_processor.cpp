@@ -48,11 +48,16 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
         // 计算位置 yaw 和 pitch
         Eigen::Vector3d pyd_pos = xyz2pyd(tracked_armor.position_odom);
         pc_result.pose.pitch = pyd_pos[0];
-        // 这里的 yaw 采用“位置方位角(bearing)”而非装甲板朝向。
-        pc_result.pose.yaw = pyd_pos[1];
+        
+        // 计算法向量
+        pc_result.normal_vec = tracked_armor.orientation_odom * Eigen::Vector3d::UnitZ();
+
+        // 恢复旧版逻辑：Yaw 采用装甲板法向量的朝向，与旧代码 rm_base/pose_calculator.cpp 保持一致
+        Eigen::Vector3d pyd_normal = xyz2pyd(pc_result.normal_vec);
+        pc_result.pose.yaw = pyd_normal[1];
+
         // 其他成员保持默认
         pc_result.reproject_error = 0.0;
-        pc_result.normal_vec = tracked_armor.orientation_odom * Eigen::Vector3d::UnitZ();
 
         // Armor now_detect_armor = recv_detection.res[i];
         // //     /9:color    %9:type
@@ -318,19 +323,23 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
             new_armor.phase_in_outpost_ = assigned_phase;
             // ========== 关键修改结束 ==========
 
-            ArmorPoseResult pc_result;
-            pc_result.pose.x = tracked_armor.position_odom[0];
-            pc_result.pose.y = tracked_armor.position_odom[1];
-            pc_result.pose.z = tracked_armor.position_odom[2];
-            // 计算位置向量的 yaw 和 pitch
-            Eigen::Vector3d pyd_pos = xyz2pyd(tracked_armor.position_odom);
-            pc_result.pose.pitch = pyd_pos[0];
-            // pose.yaw: 位置方位角(bearing)
-            pc_result.pose.yaw = pyd_pos[1];
-            // 其他成员保持默认
-            pc_result.reproject_error = 0.0;
-            pc_result.normal_vec = tracked_armor.orientation_odom * Eigen::Vector3d::UnitZ();
-            
+        ArmorPoseResult pc_result;
+        pc_result.pose.x = tracked_armor.position_odom[0];
+        pc_result.pose.y = tracked_armor.position_odom[1];
+        pc_result.pose.z = tracked_armor.position_odom[2];
+        // 计算位置 yaw 和 pitch
+        Eigen::Vector3d pyd_pos = xyz2pyd(tracked_armor.position_odom);
+        pc_result.pose.pitch = pyd_pos[0];
+        
+        // 计算法向量
+        pc_result.normal_vec = tracked_armor.orientation_odom * Eigen::Vector3d::UnitZ();
+
+        // 恢复旧版逻辑：Yaw 采用装甲板法向量的朝向，与旧代码 rm_base/pose_calculator.cpp 保持一致
+        Eigen::Vector3d pyd_normal = xyz2pyd(pc_result.normal_vec);
+        pc_result.pose.yaw = pyd_normal[1];
+
+        // 其他成员保持默认
+        pc_result.reproject_error = 0.0;
             // 初始化滤波器
             new_armor.init(pc_result, timestamp);
             new_armor.status_ = Alive;
@@ -468,15 +477,6 @@ void OutpostManager::updateOutpost(){
             now_observe.y = armor.getPositionXyz()[1];
             now_observe.z = armor.getPositionXyz()[2];
 
-            // 确认后的定义：now_observe.yaw 表示“0号装甲板相位角 yaw0”。
-            // 因此需要先求“观测装甲板 i 的相位角 yaw_i”，再换算 yaw0 = yaw_i - i*angle_dis。
-            // yaw_i 应该以“前哨站中心”为参考（CKF 预测中心），否则切换装甲板会引入台阶，omega 易发散/翻符号。
-            // Debug: 观测/解缠/omega 翻转定位（仅在 debug 模式输出，且做节流）
-            const auto pre_state = outpost.op_ckf.getState();
-            const double pre_yaw = pre_state.yaw;
-
-            // 观测量的 yaw 按“0号装甲板yaw(yaw0)”定义：yaw0 = yaw_i - i*angle_dis。
-            // 其中 yaw_i 使用装甲板朝向yaw(odom)，不依赖中心估计，避免正反馈放大 omega 抖动。
             now_observe.yaw = armor.pc_result_.pose.yaw - armor.phase_in_outpost_ * angle_dis;
 
             // 更新高度映射，检查是否已收集到三块装甲板的高度数据
@@ -500,24 +500,19 @@ void OutpostManager::updateOutpost(){
                                      outpost.alive_ts, now_observe.z);
                 outpost.outpost_kf_init = true;
                 RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Outpost CKF initialized with armor phase=%d", armor.phase_in_outpost_);
-            } else {
-                // 处理过0
-                if (now_observe.yaw - outpost.last_yaw < -M_PI * 1.5) {
-                    outpost.yaw_round++;
-                } else if (now_observe.yaw - outpost.last_yaw > M_PI * 1.5) {
-                    outpost.yaw_round--;
-                }
-                outpost.last_yaw = now_observe.yaw;
-                now_observe.yaw = now_observe.yaw + outpost.yaw_round * 2 * M_PI;
-
-                // 仅做 ±2π 平移：把 yaw0 观测对齐到预测 yaw 的邻域，避免 wrap 导致的巨大创新把 omega 拉爆/翻符号
-                const double dy_to_pre = std::remainder(now_observe.yaw - pre_yaw, 2 * M_PI);
-                now_observe.yaw = pre_yaw + dy_to_pre;
-
-                outpost.update(now_observe, outpost.alive_ts, armor.phase_in_outpost_);
-
-                RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "CKF updated with phase %d", armor.phase_in_outpost_);
             }
+            // 处理过0
+            if (now_observe.yaw - outpost.last_yaw < -M_PI * 1.5) {
+                outpost.yaw_round++;
+            } else if (now_observe.yaw - outpost.last_yaw > M_PI * 1.5) {
+                outpost.yaw_round--;
+            }
+            outpost.last_yaw = now_observe.yaw;
+            now_observe.yaw = now_observe.yaw + outpost.yaw_round * 2 * M_PI;
+
+            outpost.update(now_observe, outpost.alive_ts, armor.phase_in_outpost_);
+            RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "CKF updated with phase %d", armor.phase_in_outpost_);
+            
 
             // 更新高度滤波器
             outpost.const_z_filter.update(now_observe.z);
