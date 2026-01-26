@@ -13,7 +13,6 @@ void OutpostArmor::init(const ArmorPoseResult &pc_result, double _timestamp){
     pc_result_ = pc_result;
     // 重置滤波器
     Eigen::Matrix<double, 3, 1> new_pyd = pc_result_.pose.get_pyd_vec();
-    // Eigen::Vector3d xyz = pc_result_.pose.get_xyz_vec(); 
 
     status_ = Alive;
     alive_ts_ = _timestamp;
@@ -22,12 +21,9 @@ void OutpostArmor::init(const ArmorPoseResult &pc_result, double _timestamp){
     last_yaw_ = new_pyd[1];
     last_ori_yaw_ = new_pyd[1];
 
-    // phase_in_outpost_ = -1;  // -1表示未分配ID
-    
     RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "OutpostArmor init, ID not assigned yet");
     
     armor_kf_.init(new_pyd, _timestamp);
-
     OutpostYawEkf::Vz z;
     z << pc_result_.pose.yaw;
     yaw_kf_.init(z, _timestamp);
@@ -36,7 +32,6 @@ void OutpostArmor::init(const ArmorPoseResult &pc_result, double _timestamp){
 void OutpostArmor::update(ArmorPoseResult &pc_result, double _timestamp){
     // 更新点坐标
     pc_result_ = pc_result;
-
     Eigen::Matrix<double, 3, 1> new_pyd = pc_result_.pose.get_pyd_vec();
     double new_ori_yaw = pc_result_.pose.yaw;
     // 进行yaw区间过零处理
@@ -44,7 +39,6 @@ void OutpostArmor::update(ArmorPoseResult &pc_result, double _timestamp){
         yaw_round_++;
     else if (new_pyd[1] - last_yaw_ > M_PI * 1.5)
         yaw_round_--;
-
     if (new_ori_yaw - last_ori_yaw_ < -M_PI * 1.5)
         ori_yaw_round_++;
     else if (new_ori_yaw - last_ori_yaw_ > M_PI * 1.5)
@@ -52,7 +46,6 @@ void OutpostArmor::update(ArmorPoseResult &pc_result, double _timestamp){
 
     last_yaw_ = new_pyd[1];
     new_pyd[1] += yaw_round_ * M_PI * 2;
-
     last_ori_yaw_ = new_ori_yaw;
     new_ori_yaw += ori_yaw_round_ * M_PI * 2;
 
@@ -60,8 +53,6 @@ void OutpostArmor::update(ArmorPoseResult &pc_result, double _timestamp){
     z << new_ori_yaw;
     armor_kf_.update(new_pyd, _timestamp);
     yaw_kf_.update(z, _timestamp);
-    // _new_pb.pose.yaw = yaw_kf_.getX()[0];
-
     // 更新时间戳和状态
     alive_ts_ = _timestamp;
     status_ = Alive;
@@ -123,79 +114,6 @@ double Outpost::get_armor_height_by_id(int armor_id){
     return 1.516;
 }
 
-// 是否要判断两块装甲板是否属于同一辆车？但是前哨站只有一个。。。
-
-// void Outpost::add_armor(OutpostArmor armor){
-//     static std::vector<int> alive_indexs(armor_cnt);
-//     alive_indexs.clear();
-//     for (int i = 0; i < (int)armors.size(); ++i) {
-//         if (armors[i].status_ == Status::Alive) {
-//             alive_indexs.push_back(static_cast<int>(i));
-//         }
-//     }
-//     // 在所有装甲板中寻找tracking armor并更新phase   待修改，直接接收tracker的id就行了吧
-//     double nearest_ts = 0;
-//     int nearest_id = 0;
-//     for (int i = 0; i < (int)armors.size(); ++i) {
-//         if (armors[i].alive_ts_ > nearest_ts) {
-//             nearest_ts = armors[i].alive_ts_;
-//             nearest_id = i;
-//         }
-//     }
-//     if (armors.size() > 0) { // 是否应该删去
-//         if (check_left(armor.getPositionPyd(), armors[nearest_id].getPositionPyd())) {
-//             armor.phase_in_outpost_ = (armors[nearest_id].phase_in_outpost_ - 1 + armor_cnt) % armor_cnt;
-//         } else {
-//             armor.phase_in_outpost_ = (armors[nearest_id].phase_in_outpost_ + 1 + armor_cnt) % armor_cnt;
-//         }
-//     } else {
-//         armor.phase_in_outpost_ = 0;
-//     }
-//     // NGXY_INFO("Assigned ID %d to new armor", armor.phase_in_outpost_);
-
-//     // 没有活动装甲板
-//     if (alive_indexs.size() == 0) {
-//         armors.clear();
-//         armors.push_back(armor);
-//     } else if (alive_indexs.size() == 1) {
-//         // 有一个原有的装甲板
-//         OutpostArmor previous_armor = armors[alive_indexs[0]];
-//         // 求解两个装甲板之间的位置坐标距离
-//         double armor_dis = calc_surface_dis_xyz(previous_armor.getPositionXyz(), armor.getPositionXyz());
-
-//         if (armor_dis < params.robot_2armor_dis_thresh) {
-//             // 成功组成一对装甲板
-//             armors.clear();
-//             // 保证在左边装甲板位于数组的前位 待修改
-//             if (check_left(previous_armor.getPositionPyd(), armor.getPositionPyd())) {
-//                 armors.push_back(previous_armor);
-//                 armors.push_back(armor);
-//             } else {
-//                 armors.push_back(armor);
-//                 armors.push_back(previous_armor);
-//             }
-//             // NGXY_INFO("Added armor pair: heights=[%.3f, %.3f], phases=[%d, %d]",
-//                     //  armors[0].getPositionXyz()[2], armors[1].getPositionXyz()[2],
-//                     //  armors[0].phase_in_outpost_, armors[1].phase_in_outpost_);
-//         } else {
-//             if (previous_armor.getPositionXyz().norm() > armor.getPositionXyz().norm()) {
-//                 armors.clear();
-//                 armors.push_back(armor);
-//             }
-//         }
-//     } else if (alive_indexs.size() == 2) {
-//         // add_armor_logger.warn("3 armors");
-//         // TODO
-//         // NGXY_INFO("[Outpost add_armor] 3 armors!");
-//         return;
-//     } else {
-//         // NGXY_ERROR("[Outpost add_armor] impossible armor amount: %d!", armor_cnt);
-//         // 异常情况
-//         armors.clear();
-//         armors.push_back(armor);
-//     }
-// }
-
 Outpost::OutpostPosition Outpost::predict_positions(double _timestamp){
 
     OutpostPosition result(4);
@@ -244,10 +162,6 @@ void Outpost::reset(const OutpostCkf::Observe &_observe, int _phase_id, int _arm
 
     armor_cnt = _armor_cnt;
 
-    // 更新中心高度滤波器
-    // const_z_filter.update(_z);
-    // double center_z = const_z_filter.get();
-
     outpost_kf_init = true;
 
     op_ckf.reset(_observe, _phase_id, _armor_cnt, _timestamp, _z);
@@ -258,7 +172,6 @@ void Outpost::reset(const OutpostCkf::Observe &_observe, int _phase_id, int _arm
         // 使用实际装甲板高度
         double armor_height = get_armor_height_by_id(i);
         OutpostCkf::Observe observe(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(op_ckf.Xe), i, armor_height));
-
         now_position_.armors_xyz_[i] = Eigen::Vector3d(observe.x, observe.y, observe.z);
         now_position_.armor_yaws_[i] = observe.yaw + i * op_ckf.angle_dis_;
     }
@@ -271,33 +184,23 @@ void Outpost::update(OutpostCkf::Observe _observe, double _timestamp, int _phase
         RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Invalid phase_id %d in outpost update", _phase_id);
         return;
     }
-
-    // 更新中心高度滤波器
-    //const_z_filter.update(_z);
-    //double center_z = const_z_filter.get();
-    
     // 修改观测值的高度为实际装甲板高度
     _observe.z = get_armor_height_by_id(_phase_id);
     
     op_ckf.CKF_update(_observe, _timestamp, _phase_id);
-    
-    //op_ckf.state_.z = center_z;
-
     now_position_.center_ = OutpostCkf::get_center(op_ckf.state_);
     
     for (int i = 0; i < armor_cnt; ++i) {
-
         double armor_height = get_armor_height_by_id(i);
         OutpostCkf::Observe observe(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(op_ckf.Xe), i, armor_height));
-
         now_position_.armors_xyz_[i] = Eigen::Vector3d(observe.x, observe.y, observe.z);
         now_position_.armor_yaws_[i] = observe.yaw + i * op_ckf.angle_dis_;
     }
 }
 
-void Outpost::set_unfollowed(){
-    in_follow = false;
-}
+// void Outpost::set_unfollowed(){
+//     in_follow = false;
+// }
 //-----------------------Outpost状态---------------------
 
 //---------------------OutpostCkf-------------------------

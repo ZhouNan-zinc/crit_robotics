@@ -28,15 +28,15 @@ typedef rm_msgs::msg::RmRobot RmRobotMsg;
 typedef rm_msgs::msg::State StateMsg;
 typedef vision_msgs::msg::Detection2DArray DetectionMsg;  // 添加类型别名
 
-inline ControlMsg createControlMsg(float _pitch, float _yaw, uint8_t _flag, uint8_t _one_shot_num, uint8_t _rate,
-             uint8_t _vision_follow_id/*, uint8_t _cam_mode*/){
+inline ControlMsg createControlMsg(float _pitch, float _yaw, uint8_t _flag, uint8_t _one_shot_num, uint8_t _rate
+                                    /*, uint8_t _vision_follow_id, uint8_t _cam_mode*/){
     ControlMsg now;
     now.pitch = (float)_pitch;
     now.yaw = (float)_yaw;
     now.flag = _flag;
     now.one_shot_num = _one_shot_num;
     now.rate = _rate;
-    now.vision_follow_id = _vision_follow_id;
+    //now.vision_follow_id = _vision_follow_id;
     //now.cam_mode = _cam_mode;
     return now;
 }
@@ -268,7 +268,7 @@ public:
     OutpostPosition predict_positions(double _timestamp);
     void reset(const OutpostCkf::Observe &_observe, int _phase_id, int _armor_cnt, double _timestamp, double _z);
     void update(OutpostCkf::Observe _observe, double _timestamp, int _phase_id);
-    void set_unfollowed();
+    // void set_unfollowed();
     
     double get_rotate_spd() { return op_ckf.getState().omega; }
     double get_move_spd() { return sqrt(op_ckf.getState().vx * op_ckf.getState().vx + op_ckf.getState().vy * op_ckf.getState().vy); }
@@ -302,7 +302,7 @@ public:
     MathFilter center_pos_filter[3];
     MathFilter top_pos_filter[3];
     MathFilter armor_height_filter[3];  // 分别对三个装甲板高度进行滤波 英雄
-    MathFilter aiming_z_filter = MathFilter(10); //对瞄准点的z滤波 步兵
+    MathFilter aiming_z_filter = MathFilter(20); //对瞄准点的z滤波 步兵
 
     OutpostCkf op_ckf;
 

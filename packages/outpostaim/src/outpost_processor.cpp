@@ -48,14 +48,11 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
         // 计算位置 yaw 和 pitch
         Eigen::Vector3d pyd_pos = xyz2pyd(tracked_armor.position_odom);
         pc_result.pose.pitch = pyd_pos[0];
-        
         // 计算法向量
         pc_result.normal_vec = tracked_armor.orientation_odom * Eigen::Vector3d::UnitZ();
-
-        // 恢复旧版逻辑：Yaw 采用装甲板法向量的朝向，与旧代码 rm_base/pose_calculator.cpp 保持一致
+        // Yaw 采用装甲板法向量的朝向
         Eigen::Vector3d pyd_normal = xyz2pyd(pc_result.normal_vec);
         pc_result.pose.yaw = pyd_normal[1];
-
         // 其他成员保持默认
         pc_result.reproject_error = 0.0;
 
@@ -110,256 +107,205 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
         //     continue;
         // }
 
-        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Tracked Armor ID: %d, Class ID: %d, Odom xyz: [%.2f, %.2f, %.2f], Odom pyd: [%.2f, %.2f, %.2f]", tracked_armor.id, tracked_armor.class_id,tracked_armor.position_odom[0], tracked_armor.position_odom[1], tracked_armor.position_odom[2], pyd_pos[0], pyd_pos[1], pyd_pos[2]);
+        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Tracked Armor ID: %d, Class ID: %d, Odom xyz: [%.3f, %.3f, %.3f], Odom pyd: [%.3f, %.3f, %.3f]", tracked_armor.id, tracked_armor.class_id,tracked_armor.position_odom[0], tracked_armor.position_odom[1], tracked_armor.position_odom[2], pyd_pos[0], pyd_pos[1], pyd_pos[2]);
 
         // 这个id是否有问题？
         current_frame_armors[tracked_armor.id] = tracked_armor;
 
         // 检查是否已有相同ID的装甲板（使用tracker分配的ID进行匹配）
-        bool matched_existing = false;
-        for (auto& armor : outpost.armors) {
-            // 简单的Tracker ID匹配，仅用于帧间跟踪 当前不完全信任track id
-            // phase_in_outpost_ 初始值为-1，只有在分配了相位后才有效
-            // 先用Tracker ID匹配，如果匹配到，就使用该相位
+        // 或若 tracker_id 跳变，尝试通过 yaw 连续性把装甲板绑回原相位
+        int matched_idx = -1;
+        bool is_yaw_reassoc = false;
+        double reassoc_dyaw_val = 1e9;
+        
+        // Reassoc Thresholds
+        constexpr double kReassocYawThresh = 0.02;
+        const double kReassocMaxAge = std::min(0.30, params.reset_time);
 
-            // int phase = tracked_armor.id % 3;
-            
-            if (armor.tracker_id == tracked_armor.id && armor.tracker_id != -1) {
-                matched_existing = true;
-                
-                int phase = armor.phase_in_outpost_;
-
-                // === 过中检测逻辑 ===
-                // 检查是否有上一帧信息
-                if (last_frame_timestamp_ > 0 && !last_frame_armors_.empty()) {
-                    // 查找上一帧相同ID的装甲板
-                    auto last_armor_it = last_frame_armors_.find(tracked_armor.id);
-                    if (last_armor_it != last_frame_armors_.end()) {
-                        const auto& last_armor = last_armor_it->second;
-                        
-                        // 获取上一帧和当前帧的yaw 需要转换吗，是否可以直接获取
-                        double yaw_las = atan2(last_armor.position_odom[1], last_armor.position_odom[0]);
-                        double yaw_now = atan2(tracked_armor.position_odom[1], tracked_armor.position_odom[0]);
-                        
-                        // 获取yaw边界和中线（如果历史记录存在）
-                        if (!outpost.yaw_increase_history.empty() && !outpost.yaw_decrease_history.empty()) {
-                            double yaw_l = outpost.yaw_increase_history.front().second;
-                            double yaw_r = outpost.yaw_decrease_history.front().second;
-                            double yaw_middle = angle_middle(yaw_l, yaw_r);
-                            
-                            // 获取旋转速度
-                            double omega = outpost.common_yaw_spd.get();
-                            
-                            // 过中检测
-                            // 装甲板前后yaw角跨越yaw中线
-                            if ((omega > 0.1 && angle_between(yaw_l, yaw_middle, yaw_las) && angle_between(yaw_middle, yaw_r, yaw_now)) || 
-                                (omega < -0.1 && angle_between(yaw_middle, yaw_r, yaw_las) && angle_between(yaw_l, yaw_middle, yaw_now))) {
-
-                                if (armor.phase_in_outpost_ >= 0) {
-                                    // 更新LS拟合器
-                                    outpost.T_solver.update(timestamp);
-                                    outpost.T_solver.solve();
-                                    // 更新中间距离和pitch滤波器
-                                    Eigen::Vector3d pass_middle_pyd = xyz2pyd(tracked_armor.position_odom);
-                                    outpost.common_middle_dis.update(pass_middle_pyd[2]);
-                                    outpost.common_middle_pitch.update(pass_middle_pyd[0]);
-                                    // RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Pass Middle Timestamp: %lf", timestamp);
-                                    // RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "yaw_now %.3lf, yaw_las %.3lf", yaw_now, yaw_las);
-                                } else {
-                                    // RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "Matched but no id ???");
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 更新应该用这一帧还是上一帧的信息？？
-
-                // 更新 yaw 速度滤波 
-                outpost.common_yaw_spd.update(armor.getYawSpd());
-
-                armor.update(pc_result, timestamp);
-                armor.status_ = Alive;
-                armor.alive_ts_ = timestamp;
-                armor.matched_ = true;
-                
-                // 更新2D信息
-                armor.dis_2d_ = sqrt(pow(tracked_armor.bbox.x + tracked_armor.bbox.width/2 - params.collimation.x, 2) +
-                                     pow(tracked_armor.bbox.y + tracked_armor.bbox.height/2 - params.collimation.y, 2));
-                armor.area_2d_ = tracked_armor.bbox.area();
-                
-                RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Matched existing armor with phase %d", phase);
-
-                // 匹配成功：相位不变，并更新“最新活跃装甲板”基准
-                if (armor.phase_in_outpost_ >= 0) {
-                    phase_initialized_ = true;
-                    last_active_tracker_id_ = armor.tracker_id;
-                    last_active_phase_ = armor.phase_in_outpost_;
-                    last_active_yaw_ = armor.getPositionPyd()[1];
-                    last_active_ts_ = timestamp;
-                }
+        // 1. 优先尝试 ID 匹配
+        for (int i = 0; i < (int)outpost.armors.size(); ++i) {
+            if (outpost.armors[i].tracker_id == tracked_armor.id && outpost.armors[i].tracker_id != -1) {
+                matched_idx = i;
                 break;
             }
         }
         
-        if (!matched_existing) {
-            // ========= 快速恢复：trackid变更但物理装甲板未变（即将消失被当成新目标） =========
-            // 通过yaw连续性把“新trackid”快速绑回原相位，避免相位漂移
-            // 注意：本帧开始时 status_ 已被置为 Absent，不能用 status_ / last_status_ 来筛选“可重关联候选”
-            // 这里用 alive_ts_ 的新鲜度作为候选条件（允许短暂丢失几帧后拉回）
-            // 固定阈值（弧度）：用于快速把“新trackid”拉回原相位
-            constexpr double kReassocYawThresh = 0.02;
-            const double kReassocMaxAge = std::min(0.30, params.reset_time);
-            int best_reassoc_idx = -1;
-            double best_reassoc_dyaw = 1e9;
-            for (int i = 0; i < (int)outpost.armors.size(); ++i) {
+        // 2. 若 ID 未匹配，尝试 Yaw 连续性匹配
+        if (matched_idx == -1) {
+             double best_dyaw = 1e9;
+             int best_idx = -1;
+             for (int i = 0; i < (int)outpost.armors.size(); ++i) {
                 const auto& a = outpost.armors[i];
                 if (a.phase_in_outpost_ < 0) continue;
                 if (a.alive_ts_ < 0) continue;
-                const double age = timestamp - a.alive_ts_;
-                if (age > kReassocMaxAge) continue;
+                if ((timestamp - a.alive_ts_) > kReassocMaxAge) continue;
 
                 const double a_yaw = a.getPositionPyd()[1];
                 const double dyaw = fabs(get_disAngle(pyd_pos[1], a_yaw));
-                if (dyaw < best_reassoc_dyaw) {
-                    best_reassoc_dyaw = dyaw;
-                    best_reassoc_idx = i;
+                
+                if (dyaw < kReassocYawThresh && dyaw < best_dyaw) {
+                    best_dyaw = dyaw;
+                    best_idx = i;
                 }
-            }
-            if (best_reassoc_idx == -1) {
-                RCLCPP_INFO(rclcpp::get_logger("outpostaim"),
-                            "Best reassoc idx: -1 (no candidates), armors=%zu, max_age=%.3f", outpost.armors.size(), kReassocMaxAge);
-            } else {
-                RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Best reassoc idx: %d, dyaw: %.3f", best_reassoc_idx, best_reassoc_dyaw);
-            }
-            if (best_reassoc_idx != -1 && best_reassoc_dyaw < kReassocYawThresh) {
-                auto& a = outpost.armors[best_reassoc_idx];
-                const int phase = a.phase_in_outpost_;
-
-                // 绑定新的trackid并更新该装甲板
-                a.tracker_id = tracked_armor.id;
-                a.update(pc_result, timestamp);
-                a.status_ = Alive;
-                a.alive_ts_ = timestamp;
-                a.matched_ = true;
-                a.dis_2d_ = sqrt(pow(tracked_armor.bbox.x + tracked_armor.bbox.width / 2 - params.collimation.x, 2) +
-                                 pow(tracked_armor.bbox.y + tracked_armor.bbox.height / 2 - params.collimation.y, 2));
-                a.area_2d_ = tracked_armor.bbox.area();
-
-                phase_initialized_ = true;
-                last_active_tracker_id_ = a.tracker_id;
-                last_active_phase_ = phase;
-                last_active_yaw_ = a.getPositionPyd()[1];
-                last_active_ts_ = timestamp;
-
-                RCLCPP_WARN(rclcpp::get_logger("outpostaim"),
+             }
+             if (best_idx != -1) {
+                 matched_idx = best_idx;
+                 is_yaw_reassoc = true;
+                 reassoc_dyaw_val = best_dyaw;
+             }
+        }
+        // 匹配成功
+        if (matched_idx != -1) {
+            auto& armor = outpost.armors[matched_idx];
+            
+            if (is_yaw_reassoc) {
+                 RCLCPP_WARN(rclcpp::get_logger("outpostaim"),
                             "Re-associated armor by yaw continuity: new_tracker_id=%d -> phase=%d (|dyaw|=%.3f < thr=%.3f)",
-                            tracked_armor.id, phase, best_reassoc_dyaw, kReassocYawThresh);
-                continue;
+                            tracked_armor.id, armor.phase_in_outpost_, reassoc_dyaw_val, kReassocYawThresh);
+                 armor.tracker_id = tracked_armor.id;
             }
 
-            // 创建新的OutpostArmor
-            OutpostArmor new_armor;
-            
-            // 首先设置相位（tracker ID对3取余）  不再使用
-            // new_armor.phase_in_outpost_ = tracked_armor.id % 3;
+            int phase = armor.phase_in_outpost_;
 
-            // 设置tracker ID用于后续帧间匹配
-            new_armor.tracker_id = tracked_armor.id;
+            // === 过中检测逻辑 ===
+            // 检查是否有上一帧信息
+            if (last_frame_timestamp_ > 0 && !last_frame_armors_.empty()) {
+                // 查找上一帧相同ID的装甲板
+                auto last_armor_it = last_frame_armors_.find(tracked_armor.id);
+                if (last_armor_it != last_frame_armors_.end()) {
+                    const auto& last_armor = last_armor_it->second;
+                    
+                    // 获取上一帧和当前帧的yaw
+                    double yaw_las = atan2(last_armor.position_odom[1], last_armor.position_odom[0]);
+                    double yaw_now = atan2(tracked_armor.position_odom[1], tracked_armor.position_odom[0]);
+                    
+                    // 获取yaw边界和中线（如果历史记录存在）
+                    if (!outpost.yaw_increase_history.empty() && !outpost.yaw_decrease_history.empty()) {
+                        double yaw_l = outpost.yaw_increase_history.front().second;
+                        double yaw_r = outpost.yaw_decrease_history.front().second;
+                        double yaw_middle = angle_middle(yaw_l, yaw_r);
+                        
+                        // 获取旋转速度
+                        double omega = outpost.common_yaw_spd.get();
+                        
+                        // 过中检测
+                        // 装甲板前后yaw角跨越yaw中线
+                        if ((omega > 0.1 && angle_between(yaw_l, yaw_middle, yaw_las) && angle_between(yaw_middle, yaw_r, yaw_now)) || 
+                            (omega < -0.1 && angle_between(yaw_middle, yaw_r, yaw_las) && angle_between(yaw_l, yaw_middle, yaw_now))) {
 
-            // 设置装甲板ID（颜色和类型）  严查 这个id是？？
-            // 如果无法从 detection 得到 ArmorId，使用默认构造
-            new_armor.armor_id_ = ArmorId();
-            new_armor.score = tracked_armor.score;
-            
-            // ========== 关键修改：基于“最新活跃装甲板”分配相位 ==========
-            int assigned_phase = -1;
-
-            // 计算新装甲板yaw（yaw向左为增大，atan2符合该定义）
-            const Eigen::Vector3d new_pyd = xyz2pyd(tracked_armor.position_odom);
-
-            // 只有前哨站自瞄启动后看到的第一块装甲板才走“第一块=0”的初始化逻辑
-            if (!phase_initialized_) {
-                assigned_phase = 0;
-                phase_initialized_ = true;
-                RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Phase init: first armor -> phase 0 (tracker_id=%d)", tracked_armor.id);
-            } else {
-                // 以“最后最新活跃装甲板”为基准：优先使用上次记录；若无则退化到历史里alive_ts_最新且有相位的装甲板
-                int ref_phase = last_active_phase_;
-                double ref_yaw = last_active_yaw_;
-
-                if (ref_phase < 0) {
-                    double best_ts = -1.0;
-                    for (const auto& a : outpost.armors) {
-                        if (a.phase_in_outpost_ < 0) continue;
-                        if (a.alive_ts_ > best_ts) {
-                            best_ts = a.alive_ts_;
-                            ref_phase = a.phase_in_outpost_;
-                            ref_yaw = a.getPositionPyd()[1];
+                            if (armor.phase_in_outpost_ >= 0) {
+                                // 更新LS拟合器
+                                outpost.T_solver.update(timestamp);
+                                outpost.T_solver.solve();
+                                // 更新中间距离和pitch滤波器
+                                Eigen::Vector3d pass_middle_pyd = xyz2pyd(tracked_armor.position_odom);
+                                outpost.common_middle_dis.update(pass_middle_pyd[2]);
+                                outpost.common_middle_pitch.update(pass_middle_pyd[0]);
+                                // RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Pass Middle Timestamp: %lf", timestamp);
+                                // RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "yaw_now %.3lf, yaw_las %.3lf", yaw_now, yaw_las);
+                            } else {
+                                // RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "Matched but no id ???");
+                            }
                         }
                     }
                 }
-
-                if (ref_phase >= 0) {
-                    const Eigen::Vector3d ref_pyd(0.0, ref_yaw, 0.0);
-
-                    // 新装甲板在左：phase = (ref - 1) % 3；在右：phase = (ref + 1) % 3
-                    // 注意：check_left(A,B) 为真表示 A 在 B 左侧（yaw更大一侧，考虑wrap）
-                    if (check_left(new_pyd, ref_pyd)) {
-                        assigned_phase = (ref_phase + 2) % 3;
-                    } else {
-                        assigned_phase = (ref_phase + 1) % 3;
-                    }
-
-                    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "New armor (tracker_id=%d) yaw=%.3f ref_phase=%d ref_yaw=%.3f -> assigned_phase=%d",
-                                tracked_armor.id, new_pyd[1], ref_phase, ref_yaw, assigned_phase);
-                } else {
-                    // 兜底：没有任何有效基准（理论上只会在刚启动/被重置时发生）
-                    assigned_phase = 0;
-                    RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "No valid reference phase; fallback assigned_phase=0 (tracker_id=%d)", tracked_armor.id);
-                }
             }
 
-            new_armor.phase_in_outpost_ = assigned_phase;
-            // ========== 关键修改结束 ==========
+            // 更新 yaw 速度滤波 
+            outpost.common_yaw_spd.update(armor.getYawSpd());
 
-        ArmorPoseResult pc_result;
-        pc_result.pose.x = tracked_armor.position_odom[0];
-        pc_result.pose.y = tracked_armor.position_odom[1];
-        pc_result.pose.z = tracked_armor.position_odom[2];
-        // 计算位置 yaw 和 pitch
-        Eigen::Vector3d pyd_pos = xyz2pyd(tracked_armor.position_odom);
-        pc_result.pose.pitch = pyd_pos[0];
-        
-        // 计算法向量
-        pc_result.normal_vec = tracked_armor.orientation_odom * Eigen::Vector3d::UnitZ();
-
-        // 恢复旧版逻辑：Yaw 采用装甲板法向量的朝向，与旧代码 rm_base/pose_calculator.cpp 保持一致
-        Eigen::Vector3d pyd_normal = xyz2pyd(pc_result.normal_vec);
-        pc_result.pose.yaw = pyd_normal[1];
-
-        // 其他成员保持默认
-        pc_result.reproject_error = 0.0;
-            // 初始化滤波器
-            new_armor.init(pc_result, timestamp);
-            new_armor.status_ = Alive;
-            new_armor.alive_ts_ = timestamp;
+            armor.update(pc_result, timestamp);
+            armor.status_ = Alive;
+            armor.alive_ts_ = timestamp;
+            armor.matched_ = true;
             
-            // 设置2D信息
-            new_armor.dis_2d_ = sqrt(pow(tracked_armor.bbox.x + tracked_armor.bbox.width/2 - params.collimation.x, 2) +
-                                     pow(tracked_armor.bbox.y + tracked_armor.bbox.height/2 - params.collimation.y, 2));
-            new_armor.area_2d_ = tracked_armor.bbox.area();
+            // 更新2D信息
+            armor.dis_2d_ = sqrt(pow(tracked_armor.bbox.x + tracked_armor.bbox.width/2 - params.collimation.x, 2) +
+                                    pow(tracked_armor.bbox.y + tracked_armor.bbox.height/2 - params.collimation.y, 2));
+            armor.area_2d_ = tracked_armor.bbox.area();
             
-            new_armors.push_back(new_armor);
-            RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Created new armor with phase %d", new_armor.phase_in_outpost_);
-
-            // 新建成功也更新“最新活跃装甲板”基准
-            if (new_armor.phase_in_outpost_ >= 0) {
-                last_active_tracker_id_ = new_armor.tracker_id;
-                last_active_phase_ = new_armor.phase_in_outpost_;
-                last_active_yaw_ = new_pyd[1];
+            // 匹配成功：相位不变，并更新“最新活跃装甲板”基准
+            if (armor.phase_in_outpost_ >= 0) {
+                phase_initialized_ = true;
+                last_active_tracker_id_ = armor.tracker_id;
+                last_active_phase_ = armor.phase_in_outpost_;
+                last_active_yaw_ = armor.getPositionPyd()[1];
                 last_active_ts_ = timestamp;
             }
+            continue; // Match found, skip creating new armor
+        }
+    
+        // 匹配失败
+        // 创建新的OutpostArmor
+        OutpostArmor new_armor;
+        // 设置tracker ID用于后续帧间匹配
+        new_armor.tracker_id = tracked_armor.id;
+        // 设置装甲板ID（颜色和类型）  严查
+        // 如果无法从 detection 得到 ArmorId，使用默认构造
+        new_armor.armor_id_ = ArmorId();
+        new_armor.score = tracked_armor.score;
+        
+        // 基于“最新活跃装甲板”分配相位
+        int assigned_phase = -1;
+        // 计算新装甲板yaw，向左为增大
+        const Eigen::Vector3d new_pyd = xyz2pyd(tracked_armor.position_odom);
+        // 只有前哨站自瞄启动后看到的第一块装甲板才走“第一块=0”的初始化逻辑
+        if (!phase_initialized_) {
+            assigned_phase = 0;
+            phase_initialized_ = true;
+            RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Phase init: first armor -> phase 0 (tracker_id=%d)", tracked_armor.id);
+        } else {
+            // 以“最后最新活跃装甲板”为基准：优先使用上次记录；若无则退化到历史里alive_ts_最新且有相位的装甲板
+            int ref_phase = last_active_phase_;
+            double ref_yaw = last_active_yaw_;
+            if (ref_phase < 0) {
+                double best_ts = -1.0;
+                for (const auto& a : outpost.armors) {
+                    if (a.phase_in_outpost_ < 0) continue;
+                    if (a.alive_ts_ > best_ts) {
+                        best_ts = a.alive_ts_;
+                        ref_phase = a.phase_in_outpost_;
+                        ref_yaw = a.getPositionPyd()[1];
+                    }
+                }
+            }
+            if (ref_phase >= 0) {
+                const Eigen::Vector3d ref_pyd(0.0, ref_yaw, 0.0);
+                // 新装甲板在左：phase = (ref - 1) % 3；在右：phase = (ref + 1) % 3
+                // 注意：check_left(A,B) 为真表示 A 在 B 左侧（yaw更大一侧，考虑wrap）
+                if (check_left(new_pyd, ref_pyd)) {
+                    assigned_phase = (ref_phase + 2) % 3;
+                } else {
+                    assigned_phase = (ref_phase + 1) % 3;
+                }
+                RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "New armor (tracker_id=%d) yaw=%.3f ref_phase=%d ref_yaw=%.3f -> assigned_phase=%d",
+                            tracked_armor.id, new_pyd[1], ref_phase, ref_yaw, assigned_phase);
+            } else {
+                // 兜底：没有任何有效基准（理论上只会在刚启动/被重置时发生）
+                assigned_phase = 0;
+                RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "No valid reference phase; fallback assigned_phase=0 (tracker_id=%d)", tracked_armor.id);
+            }
+        }
+        new_armor.phase_in_outpost_ = assigned_phase;
+
+        // 初始化滤波器
+        new_armor.init(pc_result, timestamp);
+        new_armor.status_ = Alive;
+        new_armor.alive_ts_ = timestamp;
+        
+        // 设置2D信息
+        new_armor.dis_2d_ = sqrt(pow(tracked_armor.bbox.x + tracked_armor.bbox.width/2 - params.collimation.x, 2) +
+                                 pow(tracked_armor.bbox.y + tracked_armor.bbox.height/2 - params.collimation.y, 2));
+        new_armor.area_2d_ = tracked_armor.bbox.area();
+        
+        new_armors.push_back(new_armor);
+        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Created new armor with phase %d", new_armor.phase_in_outpost_);
+        // 新建成功也更新“最新活跃装甲板”基准
+        if (new_armor.phase_in_outpost_ >= 0) {
+            last_active_tracker_id_ = new_armor.tracker_id;
+            last_active_phase_ = new_armor.phase_in_outpost_;
+            last_active_yaw_ = new_pyd[1];
+            last_active_ts_ = timestamp;
         }
     }
     
@@ -493,7 +439,6 @@ void OutpostManager::updateOutpost(){
             }
             // 第一次初始化 待修改
             if (!outpost.outpost_kf_init) {
-                if(armor.phase_in_outpost_ != 0) return; // 还没找到问题，暂时限制一下
                 outpost.last_yaw = now_observe.yaw;
                 outpost.yaw_round = 0;
                 outpost.op_ckf.reset(now_observe, armor.phase_in_outpost_, outpost.armor_cnt, 
@@ -613,14 +558,8 @@ void OutpostManager::updateOutpost(){
         outpost.yaw_decrease_history.pop_front();
     }
 
-    // clear TSP, a balance between outliers & good_fitting_samples
-    // for (; !outpost.yaw_increase_history.empty() && recv_detection.time_stamp - outpost.yaw_increase_history.front().first > params.census_period_max;
-    //         outpost.yaw_increase_history.pop_front());
-    // for (; !outpost.yaw_decrease_history.empty() && recv_detection.time_stamp - outpost.yaw_decrease_history.front().first > params.census_period_max;
-    //         outpost.yaw_decrease_history.pop_front());
-    // // 清理过时的过中数据
-    // for (; outpost.T_solver.N && recv_detection.time_stamp - outpost.T_solver.datas.front() > params.anti_outpost_census_period;
-    //     outpost.T_solver.pop_front());
+    // 清理过时的过中数据
+    for (; outpost.T_solver.N && recv_detection.time_stamp - outpost.T_solver.datas.front() > params.anti_outpost_census_period; outpost.T_solver.pop_front());
 }
 
 //----------------------------------UpdateOutpost-------------------------------
@@ -948,7 +887,7 @@ ControlMsg OutpostNode::get_command(){
         // pub_float_data(target_dis_pub, std::nan("1"));    // 无目标时认为目标距离无限远
         return off_cmd;
     }
-    if(!outpost.outpost_kf_init){
+    if(!outpost.outpost_kf_init || !outpost.height_mapping_initialized_){
         RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "aim wating for outpost init");
         return off_cmd;
     }
@@ -1030,7 +969,7 @@ ControlMsg OutpostNode::get_command(){
         // 其他兵种当高度映射建立后使用映射值，否则直接使用观测值
         if(outpost.height_mapping_initialized_){
             armor_height = outpost.get_armor_height_by_id(follow_armor_id);
-        } else {
+        } else { // 还有必要吗，实际上高度映射建立前瞄准点基本无意义
             outpost.aiming_z_filter.update(target.xyz[2]);
             armor_height = outpost.aiming_z_filter.get();
         }
@@ -1048,14 +987,6 @@ ControlMsg OutpostNode::get_command(){
         return off_cmd;
     }
 
-    // if(fabs(target.yaw_distance_predict) < deg2rad(30.)){
-    //     RCLCPP_INFO(this->get_logger(), "min_dis_yaw: %lf, fire", rad2deg(fabs(target.yaw_distance_predict)));
-    // }else{
-    //     RCLCPP_INFO(this->get_logger(), "min_dis_yaw: %lf, no fire", rad2deg(fabs(target.yaw_distance_predict)));
-    // }
-    //cv::putText(manager_.recv_detection.img, std::to_string(rad2deg(fabs(target.yaw_distance_predict))), 
-    //        cv::Point(100, 100), cv::FONT_HERSHEY_SIMPLEX, 3.0, get_cv_color_scalar(CV_COLOR_LABEL::RED));
-
     // 自动开火条件判断
     double target_dis = get_dis3d(target.xyz);
     double gimbal_error_dis;
@@ -1071,8 +1002,8 @@ ControlMsg OutpostNode::get_command(){
             return off_cmd;
         }
         cmd = createControlMsg((float)follow_ball.pitch, (float)follow_ball.yaw, 
-                                1, 1, 10, 
-                                6 // vision_follow_id暂时直接用6？
+                                1, 1, 10
+                                //6 // vision_follow_id暂时直接用6？
                                 /*send_cam_mode(params_.cam_mode)*/
             );
         // 为何不用follow_ball的pitch？？
@@ -1094,14 +1025,14 @@ ControlMsg OutpostNode::get_command(){
 
         RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "aiming target dis %.3lf, yaw_dis %.3lf, yaw_f_c %.3lf", target_dis, fabs(target.yaw_distance_predict), fabs(follow_ball.yaw - center_ball.yaw));
         if(can_fire){
-            // cv::putText(manager_.recv_detection.img, "Time right", 
-            // cv::Point(100, 200), cv::FONT_HERSHEY_SIMPLEX, 3.0, get_cv_color_scalar(CV_COLOR_LABEL::RED));
+            cv::putText(manager_.result_img_, "Time right", 
+            cv::Point(100, 200), cv::FONT_HERSHEY_SIMPLEX, 3.0, cv::Scalar(0, 0, 255));
         }
         if (can_fire && gimbal_error_dis < params_.gimbal_error_dis_thresh) {
             cmd.rate = 15;
             cmd.one_shot_num = 1;
-            // cv::putText(manager_.recv_detection.img, "Fire!", 
-            // cv::Point(100, 300), cv::FONT_HERSHEY_SIMPLEX, 3.0, get_cv_color_scalar(CV_COLOR_LABEL::RED));
+            cv::putText(manager_.result_img_, "Fire!", 
+            cv::Point(100, 300), cv::FONT_HERSHEY_SIMPLEX, 3.0, cv::Scalar(0, 0, 255));
         } else {
             cmd.rate = 0;
             cmd.one_shot_num = 0;
@@ -1114,8 +1045,8 @@ ControlMsg OutpostNode::get_command(){
             cmd = createControlMsg(
             (float)center_ball.pitch,  // 使用装甲板高度的pitch
             (float)center_ball.yaw,   // 使用中心的yaw（保持瞄准中心）
-            1, 0, 0, 
-            6 // vision_follow_id暂时直接用6？
+            1, 0, 0
+            // 6 // vision_follow_id暂时直接用6？
             /*send_cam_mode(params_.cam_mode*/
             );
 
@@ -1174,47 +1105,6 @@ ControlMsg OutpostNode::get_command(){
     if (params_.enable_imshow && !params_.debug) {
         cv::Mat &img = manager_.result_img_;
         if (!img.empty()) {
-            // 左右边界
-            // cv::line(img, projectPointToImage(pyd2xyz(Eigen::Vector3d{0.7, yaw_min, 10.})),
-            //         projectPointToImage(pyd2xyz(Eigen::Vector3d{-0.7, yaw_min, 10.})),
-            //         cv::Scalar(0, 0, 255), 2);
-            // cv::line(img, projectPointToImage(pyd2xyz(Eigen::Vector3d{0.7, yaw_max, 10.})),
-            //         projectPointToImage(pyd2xyz(Eigen::Vector3d{-0.7, yaw_max, 10.})),
-            //         cv::Scalar(0, 0, 255), 2);
-
-            // // 获取预测的装甲板位置并绘制
-            // Outpost::OutpostPosition predicted_positions = outpost.predict_positions(manager_.recv_detection.time_stamp);
-            // for (int i = 0; i < outpost.armor_cnt; ++i) {
-            //     if (i < (int)predicted_positions.armors_xyz_.size()) {
-            //         Eigen::Vector3d armor_pos = predicted_positions.armors_xyz_[i];
-            //         cv::Point2f img_point = projectPointToImage(armor_pos);
-            //         cv::circle(img, img_point, 5, cv::Scalar(0, 255, 255), -1);
-            //         std::string id_text = std::to_string(i);
-            //         cv::putText(img, id_text, cv::Point(img_point.x - 5, img_point.y + 20),
-            //                    cv::FONT_HERSHEY_SIMPLEX, 0.3, cv::Scalar(0, 255, 255), 1);
-            //     }
-            // }
-
-            // // 中心点
-            // cv::Point2f center_img = projectPointToImage(predicted_positions.center_);
-            // cv::circle(img, center_img, 5, cv::Scalar(0, 255, 255), -1);
-
-            // if (outpost.height_mapping_initialized_) {
-            //     int left_text_x = 10;
-            //     int left_text_y = 120;
-            //     cv::putText(img, "Armor Height Mapping:", cv::Point(left_text_x, left_text_y),
-            //                 cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 2);
-            //     for (int i = 0; i < 3; ++i) {
-            //         left_text_y += 25;
-            //         double armor_height = outpost.get_armor_height_by_id(i);
-            //         char height_text[100];
-            //         snprintf(height_text, sizeof(height_text), "ID %d: %.3f m", i, armor_height);
-            //         int thickness = (i == follow_armor_id) ? 2 : 1;
-            //         cv::putText(img, height_text, cv::Point(left_text_x, left_text_y),
-            //                     cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), thickness);
-            //     }
-            // }
-
             if (params_.rmcv_id.robot_id != RobotId::ROBOT_HERO) {
                 // 瞄准点
                 cv::Point2f aim_point = projectPointToImage(aiming_pos_xyz);
@@ -1226,7 +1116,7 @@ ControlMsg OutpostNode::get_command(){
                 // 英雄界面
                 cv::circle(img, projectPointToImage(center_pos_xyz), 3, cv::Scalar(255, 0, 255), 5);
                 int img_width = img.cols;
-                int right_text_x = img_width - 600;
+                int right_text_x = 300;
                 int right_text_y = 30;
                 cv::putText(img, "Next 2 Armors Info:", cv::Point(right_text_x, right_text_y), cv::FONT_HERSHEY_SIMPLEX, 0.6,
                             cv::Scalar(255, 255, 255), 2);
@@ -1289,11 +1179,6 @@ ControlMsg OutpostNode::get_command(){
             }
         }
     }
-    //manager_.outpost_visual.addPoint(aiming_pos_xyz, ColorType::WHITE);
-
-    // manager_.data_visual.pub_single_data(2, cmd.pitch);
-    // manager_.data_visual.pub_single_data(3, cmd.yaw);
-
     return cmd;
 }
 
