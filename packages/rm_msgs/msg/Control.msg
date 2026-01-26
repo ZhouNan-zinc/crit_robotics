@@ -1,7 +1,7 @@
-geometry_msgs/Vector3 orientation
+rm_msgs/Imu imu
 
-uint8 gimbal_mode
-
-uint8 booster_mode
+uint8 control_mode
 
 uint8 vision_follow_id
+
+bool booster_enable

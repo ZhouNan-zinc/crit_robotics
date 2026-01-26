@@ -1,3 +1,5 @@
-geometry_msgs/Vector3 linear_velocity
+rm_msgs/Imu imu
 
-uint8 vision_mode
+uint8 robot_id
+
+bool vision_follow_enable

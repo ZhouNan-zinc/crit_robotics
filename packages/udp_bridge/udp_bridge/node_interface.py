@@ -143,7 +143,7 @@ class UdpBridge(UdpBridgeNodeInterface):
         self.sequence_number += 1
 
     def uplink_callback(self, data, msg_id=None):
-        # NOTE: !HBIQH -> big endian, uint16, uint8, uint32, uint64, uint16
+        # NOTE: !HBIH -> big endian, uint16, uint8, uint32, uint16
 
         if len(data) < self.header_size:
             self.logger.error(
@@ -151,7 +151,7 @@ class UdpBridge(UdpBridgeNodeInterface):
                 throttle_duration_sec=1.0)
             return
 
-        magic_number, version, sequence_number, timestamp, message_id = self.header_format.unpack_from(
+        magic_number, version, sequence_number, message_id = self.header_format.unpack_from(
             buffer=data,
             offset=0
         )

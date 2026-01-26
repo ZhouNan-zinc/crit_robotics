@@ -2,7 +2,7 @@ magic_number: 0xA55A
 
 version: 1
 
-header_format: "!HBIQH"
+header_format: "!HBIH"
 
 channels:
   - topic: "/test_udp"
