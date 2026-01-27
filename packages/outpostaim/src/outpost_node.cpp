@@ -56,6 +56,7 @@ OutpostNode::OutpostNode(const rclcpp::NodeOptions& options)
     control_pub = this->create_publisher<ControlMsg>("enemy_predictor", rclcpp::SensorDataQoS());
     
     target_dis_pub = this->create_publisher<std_msgs::msg::Float64>("target_dis", 10);
+    marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("outpost_vis", 10);
 
     CLK = rclcpp::Clock{RCL_STEADY_TIME};
 }
@@ -504,6 +505,129 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
         }
     }
 
+    publishMarkers(timestamp);
+
+}
+
+void OutpostNode::publishMarkers(double timestamp) {
+    if (!manager_.outpost.outpost_kf_init) return;
+
+    visualization_msgs::msg::MarkerArray marker_array;
+    
+    // 公共头信息
+    auto header = std_msgs::msg::Header();
+    header.frame_id = params_.target_frame; // "odom"
+    header.stamp = this->now();
+
+    const auto& op = manager_.outpost;
+
+    // 1. 中心位置 (Sphere)
+    visualization_msgs::msg::Marker center_marker;
+    center_marker.header = header;
+    center_marker.ns = "outpost_center";
+    center_marker.id = 0;
+    center_marker.type = visualization_msgs::msg::Marker::SPHERE;
+    center_marker.action = visualization_msgs::msg::Marker::ADD;
+    center_marker.pose.position.x = op.now_position_.center_[0];
+    center_marker.pose.position.y = op.now_position_.center_[1];
+    center_marker.pose.position.z = op.now_position_.center_[2];
+    center_marker.scale.x = 0.2;
+    center_marker.scale.y = 0.2;
+    center_marker.scale.z = 0.2;
+    center_marker.color.a = 1.0;
+    center_marker.color.r = 1.0; 
+    center_marker.color.g = 1.0;
+    center_marker.color.b = 0.0; // Yellow
+    marker_array.markers.push_back(center_marker);
+
+    // 2. 中心方向/角速度 (Arrow)
+    visualization_msgs::msg::Marker center_arrow;
+    center_arrow.header = header;
+    center_arrow.ns = "outpost_center_yaw";
+    center_arrow.id = 1;
+    center_arrow.type = visualization_msgs::msg::Marker::ARROW;
+    center_arrow.action = visualization_msgs::msg::Marker::ADD;
+    center_arrow.pose.position = center_marker.pose.position;
+    // 使用中心 Yaw
+    tf2::Quaternion q;
+    q.setRPY(0, 0, op.op_ckf.state_.yaw); 
+    center_arrow.pose.orientation = tf2::toMsg(q);
+    center_arrow.scale.x = 0.5; // Length
+    center_arrow.scale.y = 0.05; 
+    center_arrow.scale.z = 0.05;
+    center_arrow.color.a = 1.0;
+    center_arrow.color.r = 1.0; 
+    center_arrow.color.g = 0.0;
+    center_arrow.color.b = 1.0; // Magenta
+    marker_array.markers.push_back(center_arrow);
+    
+    // 3. 估计的三块装甲板 (Sphere)
+    for(int i=0; i<3; ++i) {
+        visualization_msgs::msg::Marker armor_marker;
+        armor_marker.header = header;
+        armor_marker.ns = "estimated_armors";
+        armor_marker.id = 10 + i;
+        armor_marker.type = visualization_msgs::msg::Marker::SPHERE;
+        armor_marker.action = visualization_msgs::msg::Marker::ADD;
+        
+        if (i < (int)op.now_position_.armors_xyz_.size()) {
+            armor_marker.pose.position.x = op.now_position_.armors_xyz_[i][0];
+            armor_marker.pose.position.y = op.now_position_.armors_xyz_[i][1];
+            armor_marker.pose.position.z = op.now_position_.armors_xyz_[i][2];
+            armor_marker.scale.x = 0.15;
+            armor_marker.scale.y = 0.15;
+            armor_marker.scale.z = 0.15;
+            armor_marker.color.a = 0.8;
+            armor_marker.color.r = 0.0;
+            armor_marker.color.g = 1.0;
+            armor_marker.color.b = 0.0; // Green
+            marker_array.markers.push_back(armor_marker);
+        }
+    }
+
+    // 4. 用于更新的观测装甲板 Yaw (Arrow)
+    // 遍历 armors，找到 alive_ts_ 接近 current timestamp 的
+    for(const auto& armor : op.armors) {
+        if (std::abs(armor.alive_ts_ - timestamp) < 1e-4 && armor.status_ == Alive) {
+            visualization_msgs::msg::Marker obs_arrow;
+            obs_arrow.header = header;
+            obs_arrow.ns = "measured_armor_yaw";
+            // obs_arrow.id = 20 + armor.armor_id_; // Use armor_id (need to check if initialized, usually 0/1/2?)
+            // wait, armor_id_ might not be 0-2 if not phase assigned?
+            // In Outpost::update, phase is passed. OutpostArmor has phase_in_outpost_.
+            // Let's use phase_in_outpost_ for ID if available, else standard iterator
+            int marker_id = 20 + (armor.phase_in_outpost_ >= 0 ? armor.phase_in_outpost_ : 100);
+            obs_arrow.id = marker_id;
+
+            obs_arrow.type = visualization_msgs::msg::Marker::ARROW;
+            obs_arrow.action = visualization_msgs::msg::Marker::ADD;
+            
+            // 起点是观测到的位置
+            Eigen::Vector3d pos_xyz = armor.getPositionXyz(); 
+            obs_arrow.pose.position.x = pos_xyz[0];
+            obs_arrow.pose.position.y = pos_xyz[1];
+            obs_arrow.pose.position.z = pos_xyz[2];
+
+            // 这里的 Yaw 是 pc_result_.pose.yaw (Odom系下的观测Yaw)
+            double obs_yaw = armor.pc_result_.pose.yaw;
+
+            tf2::Quaternion q_obs;
+            q_obs.setRPY(0, 0, obs_yaw);
+            obs_arrow.pose.orientation = tf2::toMsg(q_obs);
+
+            obs_arrow.scale.x = 0.4;
+            obs_arrow.scale.y = 0.05;
+            obs_arrow.scale.z = 0.05;
+            obs_arrow.color.a = 1.0;
+            obs_arrow.color.r = 1.0; // Red for observation
+            obs_arrow.color.g = 0.0;
+            obs_arrow.color.b = 0.0;
+            
+            marker_array.markers.push_back(obs_arrow);
+        }
+    }
+
+    marker_pub_->publish(marker_array);
 }
 
 void OutpostNode::robotCallback(RmRobotMsg::SharedPtr robot_msg){

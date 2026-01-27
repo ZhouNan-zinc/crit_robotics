@@ -14,6 +14,7 @@
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <image_transport/image_transport.hpp>
 #include <cv_bridge/cv_bridge.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #include "outpostaim/outpost_estimator.h"
 #include "outpostaim/ballistic.h"
@@ -428,6 +429,7 @@ private:
     image_transport::CameraSubscriber camera_sub;
     rclcpp::Publisher<ControlMsg>::SharedPtr control_pub;
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr target_dis_pub;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
 
     // Latency
     rclcpp::Clock CLK;
@@ -478,6 +480,8 @@ private:
                                  std::vector<double> &total_delays, std::vector<bool> &adjust_flags);
 
     ControlMsg get_command();
+
+    void publishMarkers(double timestamp);
 
     void detectionCallback(vision_msgs::msg::Detection2DArray::UniquePtr detection_msg); // 修改回调函数
     void camera_callback(const sensor_msgs::msg::Image::ConstSharedPtr& image_msg,

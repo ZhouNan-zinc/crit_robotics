@@ -175,7 +175,8 @@ void Outpost::reset(const OutpostCkf::Observe &_observe, int _phase_id, int _arm
         now_position_.armors_xyz_[i] = Eigen::Vector3d(observe.x, observe.y, observe.z);
         now_position_.armor_yaws_[i] = observe.yaw + i * op_ckf.angle_dis_;
     }
-    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Outpost reset: phase=%d, armor_cnt=%d", _phase_id, armor_cnt);
+    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Outpost reset: phase=%d, armor_cnt=%d, Center=[%.3f, %.3f, %.3f], Yaw=%.3f", 
+        _phase_id, armor_cnt, now_position_.center_[0], now_position_.center_[1], now_position_.center_[2], op_ckf.state_.yaw);
 }
 
 void Outpost::update(OutpostCkf::Observe _observe, double _timestamp, int _phase_id){
@@ -187,14 +188,107 @@ void Outpost::update(OutpostCkf::Observe _observe, double _timestamp, int _phase
     // 修改观测值的高度为实际装甲板高度
     _observe.z = get_armor_height_by_id(_phase_id);
     
-    op_ckf.CKF_update(_observe, _timestamp, _phase_id);
+    // —————————————————————————————————由于CKF不稳定，使用CenterBall逻辑强行修正中心及角速度————————————————————————————————————
+    if (!yaw_increase_history.empty() && !yaw_decrease_history.empty()) {
+         // --- 完全替换 CKF 逻辑 ---
+        
+        // 1. 计算中心Yaw：取左右边界的中线Yaw
+        double yaw_l = yaw_increase_history.front().second;
+        double yaw_r = yaw_decrease_history.front().second;
+        double yaw_center_direction = angle_middle(yaw_l, yaw_r);
+
+        // 2. 获取过中时的Pitch和Dis
+        double pitch = common_middle_pitch.get();
+        double dis_middle_armor = common_middle_dis.get();
+
+        // 3. 计算中心Dis：(middle_dis * cos(pitch) + r) / cos(pitch)
+        double dis_center = (dis_middle_armor * cos(pitch) + OutpostCkf::const_dis_) / cos(pitch);
+
+        // 4. 计算固定中心坐标XYZ
+        Eigen::Vector3d center_pyd(pitch, yaw_center_direction, dis_center);
+        Eigen::Vector3d center_xyz = pyd2xyz(center_pyd);
+
+        // 5. 确定固定Omega
+        double yaw_spd_val = common_yaw_spd.get();
+        double fixed_omega = (yaw_spd_val < 0) ? 2.5 : -2.5;
+
+        // 6. 执行简易的状态更新 (Geometry + Complementary Filter)
+        
+        // (A) 预测步: 根据时间差预测 Yaw
+        double dt = _timestamp - op_ckf.last_timestamp_;
+        if (op_ckf.last_timestamp_ < 0) dt = 0; // 首次
+        double predicted_yaw = op_ckf.state_.yaw + fixed_omega * dt;
+
+        // (B) 观测步: 根据固定中心和当前装甲板坐标反解 Yaw
+        // Vector Center -> Armor
+        double dx = _observe.x - center_xyz[0];
+        double dy = _observe.y - center_xyz[1];
+        // 算出的 yaw 是该块装甲板的 yaw
+        double measured_armor_yaw = atan2(dy, dx);
+        // 换算回 0 号装甲板的相位 (yaw)
+        double measured_base_yaw = measured_armor_yaw - _phase_id * op_ckf.angle_dis_;
+        
+        // (C) 融合步: 对预测和观测进行加权融合 (处理角度跳变)
+        // 观测位置越准，alpha 越大。由于中心固定，位置观测相对可信。
+        // 为了解决“旋转忽快忽慢且反向”的问题，必须大幅降低测量权值 alpha，
+        // 使滤波器更多地信赖平滑的预测模型 (Fixed Omega)，仅利用观测缓慢修正相位偏差。
+        double alpha = 0.01; // 从 0.3 降低到 0.05，增强平滑性
+        double diff = measured_base_yaw - predicted_yaw;
+        // Angle Wrap (-PI, PI)
+        while (diff > M_PI) diff -= 2 * M_PI;
+        while (diff < -M_PI) diff += 2 * M_PI;
+        
+        // 只有当观测与预测偏差没那么离谱时才进行修正，防止相位解算错误导致突变
+        // 2.5 rad/s * 0.01s = 0.025 rad. 偏差大于 0.5 rad 说明观测可能异常或相位匹配错误
+        if (fabs(diff) > 1.0) { 
+             // 这里可以加个逻辑：如果偏差极大，可能相位匹配错了，或者预测跟丢了
+             // 暂时选择：相信模型，暂缓修正，或给予极小修正
+             alpha = 0.01;
+        }
+
+        double final_yaw = predicted_yaw + alpha * diff;
+
+        // (D) 写回 State (完全绕过 CKF_update)
+        op_ckf.state_.x = center_xyz[0];
+        op_ckf.state_.y = center_xyz[1];
+        op_ckf.state_.z = center_xyz[2];
+        op_ckf.state_.vx = 0; // 固定中心，无速度
+        op_ckf.state_.vy = 0;
+        op_ckf.state_.yaw = final_yaw;
+        op_ckf.state_.omega = fixed_omega;
+        
+        // 更新 Xe 向量和时间戳，保持一致性
+        op_ckf.Xe = op_ckf.state_.toVx();
+        op_ckf.last_timestamp_ = _timestamp;
+        op_ckf.const_z_ = center_xyz[2];
+
+        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), 
+            "Simplified Model: Center=[%.3f, %.3f], Omega=%.1f | GeomYaw=%.3f, PredYaw=%.3f -> FinalYaw=%.3f",
+            center_xyz[0], center_xyz[1], fixed_omega, measured_base_yaw, predicted_yaw, final_yaw);
+
+    } else {
+        // 如果 CenterBall 数据未就绪，使用原 CKF 进行初始化/过渡
+        op_ckf.CKF_update(_observe, _timestamp, _phase_id);
+    }
+    // ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+
     now_position_.center_ = OutpostCkf::get_center(op_ckf.state_);
+
+    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), 
+        "Outpost Update [ts=%.4f]: Phase=%d | Center=[%.3f, %.3f, %.3f] | Yaw=%.3f, Omega=%.3f",
+        _timestamp, _phase_id, 
+        now_position_.center_[0], now_position_.center_[1], now_position_.center_[2], 
+        op_ckf.state_.yaw, op_ckf.state_.omega);
     
     for (int i = 0; i < armor_cnt; ++i) {
         double armor_height = get_armor_height_by_id(i);
         OutpostCkf::Observe observe(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(op_ckf.Xe), i, armor_height));
         now_position_.armors_xyz_[i] = Eigen::Vector3d(observe.x, observe.y, observe.z);
         now_position_.armor_yaws_[i] = observe.yaw + i * op_ckf.angle_dis_;
+
+        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), 
+            "  -> Armor %d: Pos=[%.3f, %.3f, %.3f], Yaw=%.3f", 
+            i, now_position_.armors_xyz_[i][0], now_position_.armors_xyz_[i][1], now_position_.armors_xyz_[i][2], now_position_.armor_yaws_[i]);
     }
 }
 

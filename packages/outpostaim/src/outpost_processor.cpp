@@ -415,7 +415,17 @@ void OutpostManager::updateOutpost(){
         }
         outpost.yaw_decrease_history.push_back(std::make_pair(armor.alive_ts_, armor.getYaw()));
 
-        // 更新CKF（如果有有效的相位）   暂时不过滤
+        // 先不过滤
+        // bool shouldUpdate = false;
+        // if(outpost.T_solver.N >= 1){
+        //     double last_middle_time = outpost.T_solver.get_last_middle_time();
+        //     double time_diff = fabs(recv_detection.time_stamp - last_middle_time);
+        //     if((time_diff > 0.1 && time_diff < 0.316) || (time_diff > 0.516 && time_diff < 0.73)){
+        //         shouldUpdate = true;
+        //     }
+        // }
+
+        // 更新CKF（如果有有效的相位）
         if (armor.phase_in_outpost_ >= 0) {
             double angle_dis = M_PI * 2 / outpost.armor_cnt;
             OutpostCkf::Observe now_observe;
@@ -1112,7 +1122,7 @@ ControlMsg OutpostNode::get_command(){
                 std::string height_text = "Z:" + std::to_string(aiming_pos_xyz[2]).substr(0, 5) + "m";
                 cv::putText(img, height_text, cv::Point(aim_point.x + 10, aim_point.y - 20),
                             cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 0, 255), 1);
-            } else {
+            } // else {
                 // 英雄界面
                 cv::circle(img, projectPointToImage(center_pos_xyz), 3, cv::Scalar(255, 0, 255), 5);
                 int img_width = img.cols;
@@ -1176,7 +1186,7 @@ ControlMsg OutpostNode::get_command(){
                 right_text_y += 25;
                 std::string fitter_text = "Fitter: N=" + std::to_string(outpost.T_solver.N) + ", yaw_spd " + std::to_string(outpost.common_yaw_spd.get()).substr(0,5);
                 cv::putText(img, fitter_text, cv::Point(right_text_x, right_text_y), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255,255,255), 1);
-            }
+            // }
         }
     }
     return cmd;
