@@ -12,7 +12,7 @@ sys.path.append(os.path.join(get_package_share_directory("rm_bringup"), "launch"
 robot_dir = "new_rudder_2"
 use_can = False
 # rosbag config
-bag_dir = "/home/ubuntu/outpost_new"
+bag_dir = "/home/ubuntu/outpostnew4"
 rate = "1.0"
 
 def generate_launch_description():

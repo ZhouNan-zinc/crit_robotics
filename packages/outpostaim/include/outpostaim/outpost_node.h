@@ -110,7 +110,6 @@ struct OutpostDetectMsg {
     VisionMode mode;
 };
 
-// 修改 ArmorPoseResult 结构体（放在 OutpostArmor 定义之前）
 struct ArmorPoseResult {
     NgxyPose pose;
     double reproject_error;
@@ -158,59 +157,36 @@ struct OutpostNodeParams {
     RobotIdDji robot_id;
     RmcvId rmcv_id;
 
-    double top_offset_z;    // 顶装甲相对于前哨站中心的高度
-    double top_offset_dis;  // 顶装甲相对于前哨站装甲板中心的水平投影距离
-    double size_ratio_thresh;  // 切换整车滤波跟踪装甲板的面积阈值/切换选择目标的面积阈值
-    double timestamp_thresh;               // 反前哨站时间差阈值
-
     // 火控参数
+    double timestamp_thresh;               // 开火时间差阈值
     double change_armor_time_thresh;
     double midshot_period;
     double dis_yaw_thresh;
-    double dis_thresh_kill;                    // 普通步兵斩杀线距离（在dis_thresh_common内的慢速目标开启高射频）
-    double low_spd_thresh;                     // 自动发射运动速度阈值
     double gimbal_error_dis_thresh;            // 自动发弹阈值，限制云台误差的球面意义距离
-    double gimbal_error_dis_thresh_old;        // 自动发弹阈值，限制云台误差的球面意义距离
-    double residual_thresh;                    // 均值残差平方阈值判断发弹
-    double tangential_spd_thresh;              // 切向速度阈值
-    double normal_spd_thresh;                  // 径向速度阈值
-    double decel_delay_time;                   // 减速停火时间
-    bool choose_enemy_without_autoaim_signal;  // 在没有收到右键信号的时候也选择目标（调试用)
-    bool disable_auto_shoot;
     // 延迟参数
     double response_delay;  // 系统延迟(程序+通信+云台响应)
     double shoot_delay;     // 发弹延迟
-    double gimbal_adjust_delay;  // 云台调整延迟时间
+    double gimbal_adjust_delay;  // 云台调整延迟时间 仅用于英雄选择目标
 
     int hero_fixed_armor_id;
     bool enable_hero_dynamic_selection;  // 是否启用英雄动态选择
 
-    double robot_2armor_dis_thresh;  // 同一车上相邻两装甲板最远距离
-
-    //--------------原 Manager-----------------------------
+    //--------------Manager-----------------------------
     // 传统方法感知陀螺/前哨站相关参数
-    double census_period_min;
     double census_period_max;
     double anti_outpost_census_period;  // 过中时间的过时阈值, 之前的过中时间与当前时间的差值小于该period, 就认为未过时
-    double anti_outpost_census_period_min;
-    double anti_outpost_census_period_max;
-    double top_pitch_thresh;         // 判定建筑顶端装甲板的pitch阈值
+
     // 装甲目标过滤/选择
+    double top_pitch_thresh;         // 判定建筑顶端装甲板的pitch阈值
     double sight_limit;         // 过滤距离过远装甲板
     double high_limit;          // 过滤距离过高过低的装甲板
     double size_limit;          // 按面积过滤装甲板（太小）
     double bound_limit;         // 过滤图像边缘的装甲板（单位为像素）
-    double aspect_limit_big;    // 当大装甲板处于40度时宽高比 公式m*sin(40)/n
     double aspect_limit_small;  // 当小装甲板处于40度时宽高比
     double reset_time;         // 若在视野中消失 reset_time秒，认为目标丢失
     cv::Point2d collimation;   // 二维图像上的准星
     // 帧间匹配
     double interframe_dis_thresh;    // 两帧间装甲板的最大移动距离（用于帧间匹配）
-    int id_inertia;                  // 摩尔投票编号过滤惯性帧数
-    // 调试
-    // bool enable_imshow;
-    // bool debug;
-
 };
 
 enum Status { Alive = 0, Absent};
@@ -241,12 +217,10 @@ public:
     int ori_yaw_round_ = 0;  // yaw定义为:世界坐标系下目标相对于车的yaw
     double last_ori_yaw_ = 0;
     
-    int vote_cnt_ = 1;                       // 摩尔投票计数
     bool matched_ = false;  // 帧间匹配标志位（这个可以不用放在类里面）
     int tracker_id = -1;  // 添加：Tracker ID，用于帧间匹配，不用于相位分配
     int phase_in_outpost_ = -1; // 装甲板id初始化为-1，表示未分配ID
     ArmorPoseResult pc_result_;  // 滤波前位姿
-    double yaw_dis_predict_; 
     OutpostArmorEkf armor_kf_;
     OutpostYawEkf yaw_kf_;
 };
@@ -274,13 +248,10 @@ public:
     double get_rotate_spd() { return op_ckf.getState().omega; }
     double get_move_spd() { return sqrt(op_ckf.getState().vx * op_ckf.getState().vx + op_ckf.getState().vy * op_ckf.getState().vy); }
 
-    // 高度相关函数（仅英雄使用）
+    // 高度相关函数
     void update_armor_height(int armor_id, double observed_height);
     double get_armor_height_by_id(int armor_id);
-    //bool is_height_mapping_enabled() const { return height_mapping_enabled_; }
-    //void set_height_mapping_enabled(bool enabled) { height_mapping_enabled_ = enabled; }
-    //bool is_height_mapping_initialized() const { return height_mapping_initialized_; }
-    
+
     inline static OutpostNodeParams params;
 
     // 高度映射状态
@@ -288,7 +259,7 @@ public:
     bool height_mapping_initialized_ = false;  // 是否已收集到三块装甲板的高度数据
     double armor_heights_[3] = {1.416, 1.516, 1.616};  // 默认高度，会被实际观测覆盖
 
-    //double target_dis_before_init_ = INFINITY; // 初始化完成前暂时使用的目标距离（保证ROI正常）
+    //double target_dis_before_init_ = INFINITY; // 初始化完成前暂时使用的目标距离（保证ROI正常） 已取消
     
     // outpost状态
     Status status = Status::Absent;
@@ -301,9 +272,9 @@ public:
     MathFilter common_middle_dis, common_middle_pitch, common_yaw_spd = MathFilter(10);
     MathFilter const_z_filter = MathFilter(20, ArithmeticMean);
     MathFilter center_pos_filter[3];
-    MathFilter top_pos_filter[3];
+    // MathFilter top_pos_filter[3];
     MathFilter armor_height_filter[3];  // 分别对三个装甲板高度进行滤波 英雄
-    MathFilter aiming_z_filter = MathFilter(20); //对瞄准点的z滤波 步兵
+    // MathFilter aiming_z_filter = MathFilter(20); //对瞄准点的z滤波 步兵
 
     OutpostCkf op_ckf;
 
@@ -350,23 +321,16 @@ public:
         camera_k_ = k;
         camera_d_ = d;
     }
-    
     // 设置图像用于可视化
     void setImage(const cv::Mat& img) {
         result_img_ = img.clone();
     }
-    
     // 获取可视化图像
     cv::Mat getVisualizationImage() const {
         return result_img_;
     }
     //外部加载
     inline static OutpostNodeParams params;
-    // rviz visual;
-    // RvizVisualizer outpost_visual;
-    // std::string visual_label = "[OutpostManager]";
-    // // watch_data_pub
-    // DataVisualizer data_visual;
 
     // 机器人自身信息
     RmcvId self_id;
@@ -376,9 +340,6 @@ public:
     // int target_outpost_id;
     // 接收到的检测消息
     OutpostDetectMsg recv_detection;
-
-    // 不再需要ArmorPoseCalculator进行PNP解算，但保留用于坐标变换
-    // ArmorPoseCalculator pc;
 
     // 可视化相关
     cv::Mat result_img_;
@@ -405,9 +366,6 @@ public:
     explicit OutpostNode(const rclcpp::NodeOptions &options);
     ~OutpostNode() override = default;
 
-    // void loadFilterConfig();
-    // void loadOutpostParams();
-    // void loadOutpostManagerParams();
     void loadAllParams();
 
 private:
@@ -428,7 +386,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_sub; // 添加相机信息订阅 需要吗？
     image_transport::CameraSubscriber camera_sub;
     rclcpp::Publisher<ControlMsg>::SharedPtr control_pub;
-    rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr target_dis_pub;
+    // rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr target_dis_pub;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
 
     // Latency
@@ -450,20 +408,17 @@ private:
 
     Eigen::Isometry3d getTrans(const std::string& source_frame, 
                                const std::string& target_frame);
-
      // 坐标变换辅助函数
     bool transformPoseToOdom(const geometry_msgs::msg::Pose& pose_camera, 
                             const std_msgs::msg::Header& header,
-                            geometry_msgs::msg::Pose& pose_odom);
-                            
+                            geometry_msgs::msg::Pose& pose_odom);        
     // 将相机系下的位姿转换到odom系
     bool convertCameraToOdom(const Eigen::Vector3d& pos_camera,
                            const Eigen::Quaterniond& ori_camera,
                            const builtin_interfaces::msg::Time& stamp,
                            Eigen::Vector3d& pos_odom,
                            Eigen::Quaterniond& ori_odom);
-
-                           // 在 OutpostNode 类中添加：
+    // 重投影
     cv::Point2d projectPointToImage(const Eigen::Vector3d& point_odom);
     Eigen::Vector3d transPoint(const Eigen::Vector3d& source_point, 
                             const std::string& source_frame, 

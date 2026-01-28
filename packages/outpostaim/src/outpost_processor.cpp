@@ -109,7 +109,6 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
 
         RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Tracked Armor ID: %d, Class ID: %d, Odom xyz: [%.3f, %.3f, %.3f], Odom pyd: [%.3f, %.3f, %.3f]", tracked_armor.id, tracked_armor.class_id,tracked_armor.position_odom[0], tracked_armor.position_odom[1], tracked_armor.position_odom[2], pyd_pos[0], pyd_pos[1], pyd_pos[2]);
 
-        // 这个id是否有问题？
         current_frame_armors[tracked_armor.id] = tracked_armor;
 
         // 检查是否已有相同ID的装甲板（使用tracker分配的ID进行匹配）
@@ -119,10 +118,10 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
         double reassoc_dyaw_val = 1e9;
         
         // Reassoc Thresholds
-        constexpr double kReassocYawThresh = 0.02;
+        constexpr double kReassocYawThresh = 0.08; // 阈值后期再调
         const double kReassocMaxAge = std::min(0.30, params.reset_time);
 
-        // 1. 优先尝试 ID 匹配
+        // 优先尝试 ID 匹配
         for (int i = 0; i < (int)outpost.armors.size(); ++i) {
             if (outpost.armors[i].tracker_id == tracked_armor.id && outpost.armors[i].tracker_id != -1) {
                 matched_idx = i;
@@ -130,7 +129,7 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
             }
         }
         
-        // 2. 若 ID 未匹配，尝试 Yaw 连续性匹配
+        // 若 ID 未匹配，尝试 Yaw 连续性匹配
         if (matched_idx == -1) {
              double best_dyaw = 1e9;
              int best_idx = -1;
@@ -335,9 +334,9 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
             outpost.armors.push_back(armor);
         }
 
-        // 更新瞄准点z值滤波器
-        outpost.aiming_z_filter.reset();
-        outpost.aiming_z_filter.update(armor.getPositionXyz()[2]);
+        // // 更新瞄准点z值滤波器
+        // outpost.aiming_z_filter.reset();
+        // outpost.aiming_z_filter.update(armor.getPositionXyz()[2]);
 
     }
     
@@ -415,18 +414,20 @@ void OutpostManager::updateOutpost(){
         }
         outpost.yaw_decrease_history.push_back(std::make_pair(armor.alive_ts_, armor.getYaw()));
 
-        // 先不过滤
-        // bool shouldUpdate = false;
-        // if(outpost.T_solver.N >= 1){
-        //     double last_middle_time = outpost.T_solver.get_last_middle_time();
-        //     double time_diff = fabs(recv_detection.time_stamp - last_middle_time);
-        //     if((time_diff > 0.1 && time_diff < 0.316) || (time_diff > 0.516 && time_diff < 0.73)){
-        //         shouldUpdate = true;
-        //     }
-        // }
+        // 过滤边界值
+        bool shouldUpdate = false;
+        if(outpost.T_solver.N >= 1){
+            double last_middle_time = outpost.T_solver.get_last_middle_time();
+            double time_diff = fabs(recv_detection.time_stamp - last_middle_time);
+            if((time_diff < 0.316 || time_diff > 0.516)){
+                shouldUpdate = true;
+            }
+        } else {
+            shouldUpdate = true;
+        }
 
         // 更新CKF（如果有有效的相位）
-        if (armor.phase_in_outpost_ >= 0) {
+        if (armor.phase_in_outpost_ >= 0 && shouldUpdate) {
             double angle_dis = M_PI * 2 / outpost.armor_cnt;
             OutpostCkf::Observe now_observe;
             now_observe.x = armor.getPositionXyz()[0];
@@ -481,7 +482,7 @@ void OutpostManager::updateOutpost(){
         }
     }
     
-    // 可视化：边界、预测装甲点、中心点与高度映射状态（使用已注册的 projector ）
+    // 可视化
     if (params.enable_imshow && !params.debug && projector && !result_img_.empty()) {
         // 需要足够的历史数据
         if (!outpost.yaw_increase_history.empty() && !outpost.yaw_decrease_history.empty()) {
@@ -555,9 +556,8 @@ void OutpostManager::updateOutpost(){
                         cv::Scalar(255, 255, 255), 1);
         }
     }
-    // rviz可视化
 
-    // 清理过时的历史记录
+    // 清理过时的历史记录  若简化模型需要考虑自身移动，则考虑缩小阈值？
     double current_time = recv_detection.time_stamp;
     while (!outpost.yaw_increase_history.empty() && 
            current_time - outpost.yaw_increase_history.front().first > params.census_period_max) {
@@ -591,23 +591,21 @@ int OutpostNode::select_armor_dynamically(double &selected_time_diff, double &se
                                                    std::vector<double> &total_delays, std::vector<bool> &adjust_flags) {
     auto& outpost = manager_.outpost;
     double now = manager_.recv_detection.time_stamp;
-
     // 清空输出向量
     time_diffs.clear();
     total_delays.clear();
     adjust_flags.clear();
-
     // 检查是否有足够的过中数据（至少需要3次过中）
     if (outpost.T_solver.N < 3) {
         RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Not enough middle events data: N=%zu", outpost.T_solver.N);
         return -1;
     }
-    // 获取当前正在跟踪的装甲板（如果有的话） 如果同时有两块，可以根据旋转方向判断取左还是右。如果没有呢？这里待修改
+    // 获取当前正在跟踪的装甲板（如果有的话） 严查
     int current_armor_id = -1;
     double current_armor_yaw = 0;
     bool found_current = false;
     for (const auto& armor : outpost.armors) {
-        if (armor.in_follow && armor.phase_in_outpost_ >= 0) {
+        if (armor.in_follow && armor.phase_in_outpost_ >= 0) { // ？这个infollow是什么
             current_armor_id = armor.phase_in_outpost_;
             current_armor_yaw = armor.getYaw();
             found_current = true;
@@ -676,7 +674,6 @@ int OutpostNode::select_armor_dynamically(double &selected_time_diff, double &se
         next_ids[0] = (current_armor_id + 1) % 3;
         next_ids[1] = (current_armor_id + 2) % 3;
     }
-    
     // 计算时间差
     double time_diff_1 = middle_time_1 - now;
     double time_diff_2 = middle_time_2 - now;
@@ -706,7 +703,7 @@ int OutpostNode::select_armor_dynamically(double &selected_time_diff, double &se
             armor_infos[i] = {armor_id, middle_time, time_diff, INFINITY, INFINITY, false};
             continue;
         }
-        // 计算系统延迟（响应+飞行+发弹）
+        // 计算延迟（响应+飞行+发弹）
         double system_delay = params_.response_delay + ball_res.t + params_.shoot_delay;
         // 计算总延迟（云台调整+系统延迟）
         double total_delay = params_.gimbal_adjust_delay + system_delay;
@@ -776,7 +773,7 @@ OpNewSelectArmor OutpostNode::select_armor_directly(){
     // 预测
     Outpost::OutpostPosition pos_predict = outpost.predict_positions(
         params_.response_delay + ball_estimate.t + manager_.recv_detection.time_stamp);
-    // 这里的yaw是id0装甲板的yaw 是否有问题？
+
     double center_yaw = atan2(pos_now.center_[1], pos_now.center_[0]);
     
     // 选取最正对的装甲板
@@ -914,11 +911,11 @@ ControlMsg OutpostNode::get_command(){
     // }
     outpost.in_follow = true;
     
-    if ((params_.rmcv_id.robot_id == RobotId::ROBOT_HERO) &&
-         !outpost.height_mapping_initialized_ && !params_.debug) {
-        RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "Height mapping not initialized yet for hero");
-        return off_cmd;
-    }
+    // if ((params_.rmcv_id.robot_id == RobotId::ROBOT_HERO) &&
+    //      !outpost.height_mapping_initialized_ && !params_.debug) {
+    //     RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "Height mapping not initialized yet for hero");
+    //     return off_cmd;
+    // }
 
     //  英雄动态选择装甲板
     int follow_armor_id = -1;
@@ -970,20 +967,22 @@ ControlMsg OutpostNode::get_command(){
 
     Eigen::Vector3d aiming_pos_xyz, aiming_pos_pyd, center_pos_xyz, center_pos_pyd, top_armor;
 
-    // 获取装甲板实际高度
+    // 获取装甲板实际高度 统一逻辑
     double armor_height = 0.0;
-    if (params_.rmcv_id.robot_id == RobotId::ROBOT_HERO) {
-        // 英雄：使用高度映射中的实际高度
-        armor_height = outpost.get_armor_height_by_id(follow_armor_id);
-    } else {
-        // 其他兵种当高度映射建立后使用映射值，否则直接使用观测值
-        if(outpost.height_mapping_initialized_){
-            armor_height = outpost.get_armor_height_by_id(follow_armor_id);
-        } else { // 还有必要吗，实际上高度映射建立前瞄准点基本无意义
-            outpost.aiming_z_filter.update(target.xyz[2]);
-            armor_height = outpost.aiming_z_filter.get();
-        }
-    }
+    armor_height = outpost.get_armor_height_by_id(follow_armor_id);
+
+    // if (params_.rmcv_id.robot_id == RobotId::ROBOT_HERO) {
+    //     // 英雄：使用高度映射中的实际高度
+    //     armor_height = outpost.get_armor_height_by_id(follow_armor_id);
+    // } else {
+    //     // 其他兵种当高度映射建立后使用映射值，否则直接使用观测值
+    //     if(outpost.height_mapping_initialized_){
+    //         armor_height = outpost.get_armor_height_by_id(follow_armor_id);
+    //     } else { // 还有必要吗，实际上高度映射建立前瞄准点基本无意义
+    //         outpost.aiming_z_filter.update(target.xyz[2]);
+    //         armor_height = outpost.aiming_z_filter.get();
+    //     }
+    // }
     
     // 解算瞄准点
     Ballistic::BallisticResult follow_ball = calc_ballistic(follow_armor_id, params_.response_delay + prev_latency, aiming_pos_xyz, armor_height);
@@ -992,7 +991,7 @@ ControlMsg OutpostNode::get_command(){
     center_pos_pyd = xyz2pyd(center_pos_xyz);
     ControlMsg cmd;
 
-    if (follow_ball.fail || center_ball.fail) {
+    if (center_ball.fail || (params_.rmcv_id.robot_id != RobotId::ROBOT_HERO && follow_ball.fail)) {
         RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "Ballistic calculation failed");
         return off_cmd;
     }
@@ -1013,7 +1012,7 @@ ControlMsg OutpostNode::get_command(){
         }
         cmd = createControlMsg((float)follow_ball.pitch, (float)follow_ball.yaw, 
                                 1, 1, 10
-                                //6 // vision_follow_id暂时直接用6？
+                                //6 // 先不设置
                                 /*send_cam_mode(params_.cam_mode)*/
             );
         // 为何不用follow_ball的pitch？？
@@ -1056,7 +1055,7 @@ ControlMsg OutpostNode::get_command(){
             (float)center_ball.pitch,  // 使用装甲板高度的pitch
             (float)center_ball.yaw,   // 使用中心的yaw（保持瞄准中心）
             1, 0, 0
-            // 6 // vision_follow_id暂时直接用6？
+            // 6 // 先不设置
             /*send_cam_mode(params_.cam_mode*/
             );
 
@@ -1111,7 +1110,7 @@ ControlMsg OutpostNode::get_command(){
         cmd.yaw -= 2 * M_PI;
     }
 
-    //下面均为可视化内容（使用新的重投影接口和 manager_.result_img_）
+    //可视化
     if (params_.enable_imshow && !params_.debug) {
         cv::Mat &img = manager_.result_img_;
         if (!img.empty()) {
@@ -1122,7 +1121,7 @@ ControlMsg OutpostNode::get_command(){
                 std::string height_text = "Z:" + std::to_string(aiming_pos_xyz[2]).substr(0, 5) + "m";
                 cv::putText(img, height_text, cv::Point(aim_point.x + 10, aim_point.y - 20),
                             cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 0, 255), 1);
-            } // else {
+            } else {
                 // 英雄界面
                 cv::circle(img, projectPointToImage(center_pos_xyz), 3, cv::Scalar(255, 0, 255), 5);
                 int img_width = img.cols;
@@ -1186,7 +1185,7 @@ ControlMsg OutpostNode::get_command(){
                 right_text_y += 25;
                 std::string fitter_text = "Fitter: N=" + std::to_string(outpost.T_solver.N) + ", yaw_spd " + std::to_string(outpost.common_yaw_spd.get()).substr(0,5);
                 cv::putText(img, fitter_text, cv::Point(right_text_x, right_text_y), cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255,255,255), 1);
-            // }
+            }
         }
     }
     return cmd;

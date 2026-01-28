@@ -55,7 +55,7 @@ OutpostNode::OutpostNode(const rclcpp::NodeOptions& options)
     // 创建控制指令发布器
     control_pub = this->create_publisher<ControlMsg>("enemy_predictor", rclcpp::SensorDataQoS());
     
-    target_dis_pub = this->create_publisher<std_msgs::msg::Float64>("target_dis", 10);
+    // target_dis_pub = this->create_publisher<std_msgs::msg::Float64>("target_dis", 10);
     marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("outpost_vis", 10);
 
     CLK = rclcpp::Clock{RCL_STEADY_TIME};
@@ -73,9 +73,6 @@ void OutpostNode::loadAllParams() {
     params_.target_frame = this->declare_parameter("target_frame", "odom");
     params_.camera_frame = this->declare_parameter("camera_frame", "camera_optical_frame");
 
-    params_.top_offset_z = this->declare_parameter("top_offset_z", 0.5);
-    params_.top_offset_dis = this->declare_parameter("top_offset_dis", 0.5);
-    params_.size_ratio_thresh = this->declare_parameter("size_ratio_thresh", 0.5);
     params_.timestamp_thresh = this->declare_parameter("timestamp_thresh", 0.5);
     params_.midshot_period = declare_parameter("midshot_period", 0.02);
 
@@ -85,22 +82,11 @@ void OutpostNode::loadAllParams() {
     // 火控参数
     params_.change_armor_time_thresh = declare_parameter("change_armor_time_thresh", 0.0);
     params_.dis_yaw_thresh = declare_parameter("dis_yaw_thresh", 0.0);
-    params_.dis_thresh_kill = declare_parameter("dis_thresh_kill", 0.0);
-    params_.low_spd_thresh = declare_parameter("low_spd_thresh", 0.0);
     params_.gimbal_error_dis_thresh = declare_parameter("gimbal_error_dis_thresh", 0.0);
-    params_.gimbal_error_dis_thresh_old = declare_parameter("gimbal_error_dis_thresh_old", 0.0);
-    params_.residual_thresh = declare_parameter("residual_thresh", 0.0);
-    params_.tangential_spd_thresh = declare_parameter("tangential_spd_thresh", 0.0);
-    params_.normal_spd_thresh = declare_parameter("normal_spd_thresh", 0.0);
-    params_.decel_delay_time = declare_parameter("decel_delay_time", 0.0);
-    params_.choose_enemy_without_autoaim_signal = declare_parameter("choose_enemy_without_autoaim_signal", false);
-    params_.disable_auto_shoot = declare_parameter("disable_auto_shoot", false);
     // 延迟参数
     params_.response_delay = declare_parameter("response_delay", 0.0);
     params_.shoot_delay = declare_parameter("shoot_delay", 0.0);
     params_.gimbal_adjust_delay = declare_parameter("gimbal_adjust_delay", 0.3);  //云台调整延迟
-
-    params_.robot_2armor_dis_thresh = this->declare_parameter("robot_2armor_dis_thresh", 0.5);
 
     params_.rmcv_id.robot_id = RobotId::ROBOT_ERROR;
     
@@ -127,17 +113,10 @@ void OutpostNode::loadAllParams() {
     RCLCPP_INFO(this->get_logger(), "filter params loaded");
     
     // 管理参数
-    params_.census_period_min = this->declare_parameter("census_period_min", 0.5);
     params_.census_period_max = this->declare_parameter("census_period_max", 0.5);
 
     params_.anti_outpost_census_period 
                         = this->declare_parameter("anti_outpost_census_period", 0.5);
-    
-    params_.anti_outpost_census_period_max 
-                        = this->declare_parameter("anti_outpost_census_period_max", 0.5);
-    
-    params_.anti_outpost_census_period_min
-                        = this->declare_parameter("anti_outpost_census_period_min", 0.5);
 
     params_.top_pitch_thresh = this->declare_parameter("top_pitch_thresh", 0.5);
 
@@ -145,7 +124,6 @@ void OutpostNode::loadAllParams() {
     params_.high_limit = this->declare_parameter("high_limit", 0.5);
     params_.size_limit = this->declare_parameter("size_limit", 0.5);
     params_.bound_limit = this->declare_parameter("bound_limit", 0.5);
-    params_.aspect_limit_big = this->declare_parameter("aspect_limit_big", 0.5);
     params_.aspect_limit_small = this->declare_parameter("aspect_limit_small", 0.5);
     params_.reset_time = this->declare_parameter("reset_time", 0.5);
     std::vector<double> collimation_vec = declare_parameter("collimation", std::vector<double>());
@@ -154,7 +132,6 @@ void OutpostNode::loadAllParams() {
     params_.collimation.y = collimation_vec[1];
 
     params_.interframe_dis_thresh = this->declare_parameter("interframe_dis_thresh", 0.5);
-    params_.id_inertia = this->declare_parameter("id_inertia", 0);
 
     params_.enable_imshow = this->declare_parameter("enable_imshow", false);
     params_.debug = this->declare_parameter("debug", false);
@@ -191,6 +168,7 @@ Eigen::Isometry3d OutpostNode::getTrans(const std::string& source_frame, const s
     return transform;
 }
 
+// 用于可视化重投影
 Eigen::Vector3d OutpostNode::transPoint(const Eigen::Vector3d& source_point, 
                                         const std::string& source_frame, 
                                         const std::string& target_frame) {
@@ -203,20 +181,17 @@ Eigen::Vector3d OutpostNode::transPoint(const Eigen::Vector3d& source_point,
         return Eigen::Vector3d::Zero();
     }
 }
-
+// 用于可视化重投影
 cv::Point2d OutpostNode::projectPointToImage(const Eigen::Vector3d& point_odom) {
     // 需要相机内参
     if (manager_.camera_k_.size() < 9) {
         return cv::Point2d(-1, -1);
     }
-
     // 将点从 odom 投影到相机坐标系
     Eigen::Vector3d p_cam = transPoint(point_odom, "odom", params_.camera_frame);
     if (p_cam[2] <= 1e-6) return cv::Point2d(-1, -1);
-
     Eigen::Matrix3d K;
     for (int i = 0; i < 9; ++i) K(i / 3, i % 3) = manager_.camera_k_[i];
-
     Eigen::Vector3d proj = K * p_cam;
     proj /= proj[2];
     return cv::Point2d(proj[0], proj[1]);
@@ -310,11 +285,9 @@ void OutpostNode::camera_callback(const sensor_msgs::msg::Image::ConstSharedPtr&
         camera_info_received_ = true;
         std::vector<double> k(9);
         std::vector<double> d(5);
-        
         for (int i = 0; i < 9; ++i) {
             k[i] = camera_info_msg->k[i];
         }
-        
         if (camera_info_msg->d.size() >= 5) {
             for (int i = 0; i < 5; ++i) {
                 d[i] = camera_info_msg->d[i];
@@ -323,7 +296,6 @@ void OutpostNode::camera_callback(const sensor_msgs::msg::Image::ConstSharedPtr&
             RCLCPP_WARN(get_logger(), "Camera distortion parameters size < 5");
             d = std::vector<double>(5, 0.0);
         }
-        
         manager_.setCameraInfo(k, d);
     }
 }
@@ -331,17 +303,14 @@ void OutpostNode::camera_callback(const sensor_msgs::msg::Image::ConstSharedPtr&
 void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
     // Cal Compute Time
     tick = CLK.now();
-
     // 检查相机信息是否已接收
     if (!camera_info_received_) {
         RCLCPP_WARN(get_logger(), "Camera info not received yet, skipping detection");
         return;
     }
-    
     // 获取时间戳
     double timestamp = rclcpp::Time(detection_msg->header.stamp).seconds();
     manager_.recv_detection.time_stamp = timestamp;
-    
     // 从机器人消息获取当前模式
     if (!manager_.robot.vision_mode.empty()) {
         params_.mode = string2vision_mode(manager_.robot.vision_mode);
@@ -364,7 +333,6 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
     // 更新自身ID
     manager_.self_id = RmcvId(static_cast<RobotIdDji>(manager_.robot.robot_id));
     params_.rmcv_id = manager_.self_id;
-    
     // 检查模式是否有效
     if (params_.mode != VisionMode::OUTPOST_AIM && params_.mode != VisionMode::AUTO_AIM) {
         RCLCPP_INFO(get_logger(), "Not in OUTPOST_AIM or AUTO_AIM mode, skipping processing");
@@ -380,18 +348,15 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
         // RCLCPP_WARN(get_logger(), "Invalid bullet velocity: %.2f", manager_.robot.bullet_velocity);
     }
     bac->refresh_velocity(is_big_bullet, manager_.robot.bullet_velocity);
-
     // 从机器人消息获取相机切换状态
     if (manager_.robot.switch_cam) {
         RCLCPP_INFO(get_logger(), "Camera switch requested");
         // 这里可以添加相机切换逻辑
     }
-    
     // 从机器人消息获取自动射击率
     if (manager_.robot.autoshoot_rate > 0) {
         // RCLCPP_INFO(get_logger(), "Auto shoot rate: %d", manager_.robot.autoshoot_rate);
     }
-
     off_cmd.flag = 0;
     // 清空之前的检测结果
     std::vector<TrackedArmor> tracked_armors;
@@ -401,20 +366,16 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
         if (detection.results.empty()) {
             continue;
         }
-        
         TrackedArmor armor;
         armor.fromDetectionMsg(detection, timestamp);
-        
         // 获取camera系下的位姿
         const auto& pose_camera = detection.results[0].pose.pose;
-        
         // 将相机坐标系下的位姿转换到odom坐标系
         Eigen::Vector3d pos_camera(
             pose_camera.position.x,
             pose_camera.position.y,
             pose_camera.position.z
         );
-        
         // 注意：当前上游把 orientation.xyz 填成了 camera 系下的 RPY（rad），且 w 恒为 1.0
         // 这里需要先把 RPY 还原成四元数，再交给 tf2 做坐标系转换。
         const double ow = pose_camera.orientation.w;
@@ -423,32 +384,25 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
         const double oz = pose_camera.orientation.z;
 
         Eigen::Quaterniond ori_camera;
-        // 兼容 imagepipe 发来的 w=0 和其他节点可能的 w=1 的 RPY 编码情况
-        if (std::abs(ow - 1.0) < 1e-3 || std::abs(ow) < 1e-3) {
-            // imagepipe 发送的 orientation 顺序为 [roll, pitch, yaw]
-            // ox(roll) 对应绕 Z 轴旋转 (光轴)
-            // oy(pitch) 对应绕 X 轴旋转 (水平)
-            // oz(yaw) 对应绕 Y 轴旋转 (垂直)
-            // tf2::setRPY(r, p, y) 对应绕固定轴 X, Y, Z 的旋转
-            
-            // 理论推导：
-            // ImagePipe PnP 解算出的 Z 轴可能指向 Cam Z 反方向（指向相机），即 Yaw=180。
-            // 转换到 Odom 系下，Normal 指向 Vehicle X (前)，即背离车 (Yaw=0)。
-            // 但物理上装甲板面向车，Normal 应指向 Vehicle -X (后)，即 Yaw=180。
-            // 因此需要补偿 M_PI 来翻转 Normal 方向。
-            const double rot_x = oy; // pitch
-            const double rot_y = oz + M_PI; // yaw + 180 deg
-            const double rot_z = ox; // roll
-            
-            tf2::Quaternion q;
-            q.setRPY(rot_x, rot_y, rot_z);
-            q.normalize();
-            ori_camera = Eigen::Quaterniond(q.w(), q.x(), q.y(), q.z());
-        } else {
-            ori_camera = Eigen::Quaterniond(ow, ox, oy, oz);
-            ori_camera.normalize();
-        }
+        // imagepipe 发送的 orientation 顺序为 [roll, pitch, yaw]
+        // ox(roll) 对应绕 Z 轴旋转 (光轴)
+        // oy(pitch) 对应绕 X 轴旋转 (水平)
+        // oz(yaw) 对应绕 Y 轴旋转 (垂直)
+        // tf2::setRPY(r, p, y) 对应绕固定轴 X, Y, Z 的旋转
+        // 理论推导：
+        // ImagePipe PnP 解算出的 Z 轴可能指向 Cam Z 反方向（指向相机），即 Yaw=180。
+        // 转换到 Odom 系下，Normal 指向 Vehicle X (前)，即背离车 (Yaw=0)。
+        // 但物理上装甲板面向车，Normal 应指向 Vehicle -X (后)，即 Yaw=180。
+        // 因此需要补偿 M_PI 来翻转 Normal 方向。
+        const double rot_x = oy; // pitch
+        const double rot_y = oz + M_PI; // yaw + 180 deg
+        const double rot_z = ox; // roll
         
+        tf2::Quaternion q;
+        q.setRPY(rot_x, rot_y, rot_z);
+        q.normalize();
+        ori_camera = Eigen::Quaterniond(q.w(), q.x(), q.y(), q.z());
+
         // 转换到odom系
         Eigen::Vector3d pos_odom;
         Eigen::Quaterniond ori_odom;
@@ -498,17 +452,57 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
                 cv::circle(vis_img, cv::Point(manager_.camera_k_[2], manager_.camera_k_[5]), 3, cv::Scalar(255, 0, 255), 2);
             }
 
+            // 绘制识别到的装甲板（2D投影）
+            // Green for projected odom points
+            for (const auto& armor : tracked_armors) {
+                cv::Point2d proj = projectPointToImage(armor.position_odom);
+                if (proj.x >= 0 && proj.y >= 0 && proj.x < vis_img.cols && proj.y < vis_img.rows) {
+                    cv::circle(vis_img, proj, 5, cv::Scalar(0, 255, 0), 2);
+                    cv::putText(vis_img, "Odom:" + std::to_string(armor.id), proj + cv::Point2d(5, -5), 
+                                cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+                }
+            }
+
             cv::imshow("Outpost Predictor", vis_img);
             cv::waitKey(1);
         } else {
             RCLCPP_WARN(get_logger(), "Image empty!!!");
         }
     }
-
+    // rviz
     publishMarkers(timestamp);
 
 }
 
+void OutpostNode::robotCallback(RmRobotMsg::SharedPtr robot_msg){
+    manager_.robot = *robot_msg;
+    // 更新自身ID
+    manager_.self_id = RmcvId(static_cast<RobotIdDji>(robot_msg->robot_id));
+    params_.rmcv_id = manager_.self_id;
+    last_mode = string2vision_mode(robot_msg->vision_mode); 
+    if (last_mode != VisionMode::OUTPOST_AIM && last_mode != VisionMode::AUTO_AIM && manager_.outpost.alive_ts > 0){
+        RCLCPP_INFO(this->get_logger(), "Reset-Outpost");
+        manager_.outpost = Outpost();
+        manager_.outpost.alive_ts = -1;
+        manager_.phase_initialized_ = false;
+        manager_.last_active_tracker_id_ = -1;
+        manager_.last_active_phase_ = -1;
+        manager_.last_active_yaw_ = 0.0;
+        manager_.last_active_ts_ = -1.0;
+    }
+    imu = manager_.robot.imu;
+
+    // 更新弹速（如果机器人消息中有） 严查
+    bool is_big_bullet = false;
+    if (robot_msg->bullet_velocity > 8.) {
+        is_big_bullet = params_.rmcv_id.robot_id == RobotId::ROBOT_HERO;
+    }else {
+        double bullet_velocity = is_big_bullet ? 12.0 : 22.9;
+    }
+    bac->refresh_velocity(is_big_bullet, robot_msg->bullet_velocity);
+}
+
+// rviz 可视化
 void OutpostNode::publishMarkers(double timestamp) {
     if (!manager_.outpost.outpost_kf_init) return;
 
@@ -517,9 +511,10 @@ void OutpostNode::publishMarkers(double timestamp) {
     // 公共头信息
     auto header = std_msgs::msg::Header();
     header.frame_id = params_.target_frame; // "odom"
-    header.stamp = this->now();
+    header.stamp = this->now(); // 使用当前时间
 
-    const auto& op = manager_.outpost;
+    // 使用预测状态，即使CKF没有更新（无目标）也能让rviz中的模型动起来
+    auto predicted_pos = manager_.outpost.predict_positions(timestamp);
 
     // 1. 中心位置 (Sphere)
     visualization_msgs::msg::Marker center_marker;
@@ -528,9 +523,9 @@ void OutpostNode::publishMarkers(double timestamp) {
     center_marker.id = 0;
     center_marker.type = visualization_msgs::msg::Marker::SPHERE;
     center_marker.action = visualization_msgs::msg::Marker::ADD;
-    center_marker.pose.position.x = op.now_position_.center_[0];
-    center_marker.pose.position.y = op.now_position_.center_[1];
-    center_marker.pose.position.z = op.now_position_.center_[2];
+    center_marker.pose.position.x = predicted_pos.center_[0];
+    center_marker.pose.position.y = predicted_pos.center_[1];
+    center_marker.pose.position.z = predicted_pos.center_[2];
     center_marker.scale.x = 0.2;
     center_marker.scale.y = 0.2;
     center_marker.scale.z = 0.2;
@@ -548,9 +543,17 @@ void OutpostNode::publishMarkers(double timestamp) {
     center_arrow.type = visualization_msgs::msg::Marker::ARROW;
     center_arrow.action = visualization_msgs::msg::Marker::ADD;
     center_arrow.pose.position = center_marker.pose.position;
-    // 使用中心 Yaw
+    // 使用滤波器当前状态的 Yaw（或者 predict_positions 也可以，但这里直接取状态比较方便）
+    // 注意：predict_positions 内部已经预测了yaw。
+    // 为了连贯，最好都用 predicted_pos
+    // 但是 OutpostPosition 结构体好像没直接存 yaw，而是存了各 armor 的 yaw。
+    // 我们可以倒推或者直接取 state。为了简单，这里直接显示各 armor。
+    
+    // 修正: 用 state 的 yaw (预测到当前时刻的)
+    OutpostCkf::State state_pred = manager_.outpost.op_ckf.predictState(timestamp);
+
     tf2::Quaternion q;
-    q.setRPY(0, 0, op.op_ckf.state_.yaw); 
+    q.setRPY(0, 0, state_pred.yaw); 
     center_arrow.pose.orientation = tf2::toMsg(q);
     center_arrow.scale.x = 0.5; // Length
     center_arrow.scale.y = 0.05; 
@@ -570,10 +573,10 @@ void OutpostNode::publishMarkers(double timestamp) {
         armor_marker.type = visualization_msgs::msg::Marker::SPHERE;
         armor_marker.action = visualization_msgs::msg::Marker::ADD;
         
-        if (i < (int)op.now_position_.armors_xyz_.size()) {
-            armor_marker.pose.position.x = op.now_position_.armors_xyz_[i][0];
-            armor_marker.pose.position.y = op.now_position_.armors_xyz_[i][1];
-            armor_marker.pose.position.z = op.now_position_.armors_xyz_[i][2];
+        if (i < (int)predicted_pos.armors_xyz_.size()) {
+            armor_marker.pose.position.x = predicted_pos.armors_xyz_[i][0];
+            armor_marker.pose.position.y = predicted_pos.armors_xyz_[i][1];
+            armor_marker.pose.position.z = predicted_pos.armors_xyz_[i][2];
             armor_marker.scale.x = 0.15;
             armor_marker.scale.y = 0.15;
             armor_marker.scale.z = 0.15;
@@ -587,7 +590,7 @@ void OutpostNode::publishMarkers(double timestamp) {
 
     // 4. 用于更新的观测装甲板 Yaw (Arrow)
     // 遍历 armors，找到 alive_ts_ 接近 current timestamp 的
-    for(const auto& armor : op.armors) {
+    for(const auto& armor : manager_.outpost.armors) {
         if (std::abs(armor.alive_ts_ - timestamp) < 1e-4 && armor.status_ == Alive) {
             visualization_msgs::msg::Marker obs_arrow;
             obs_arrow.header = header;
@@ -627,35 +630,57 @@ void OutpostNode::publishMarkers(double timestamp) {
         }
     }
 
+    // 5. 识别到的装甲板 (Cube) - Odom Frame
+    int i = 0;
+    for (const auto& armor : manager_.recv_detection.armors) {
+        visualization_msgs::msg::Marker detected_marker;
+        detected_marker.header = header;
+        detected_marker.ns = "detected_armors";
+        detected_marker.id = 30 + i;
+        detected_marker.type = visualization_msgs::msg::Marker::CUBE;
+        detected_marker.action = visualization_msgs::msg::Marker::ADD;
+        
+        detected_marker.pose.position.x = armor.position_odom.x();
+        detected_marker.pose.position.y = armor.position_odom.y();
+        detected_marker.pose.position.z = armor.position_odom.z();
+        
+        detected_marker.pose.orientation.w = armor.orientation_odom.w();
+        detected_marker.pose.orientation.x = armor.orientation_odom.x();
+        detected_marker.pose.orientation.y = armor.orientation_odom.y();
+        detected_marker.pose.orientation.z = armor.orientation_odom.z();
+
+        detected_marker.scale.x = 0.135; // Width
+        detected_marker.scale.y = 0.125; // Height
+        detected_marker.scale.z = 0.05;  // Thickness (Z is normal)
+
+        detected_marker.color.a = 0.8;
+        detected_marker.color.r = 0.0;
+        detected_marker.color.g = 1.0;
+        detected_marker.color.b = 1.0; // Cyan
+        
+        marker_array.markers.push_back(detected_marker);
+
+        // Text ID
+        visualization_msgs::msg::Marker text_marker;
+        text_marker.header = header;
+        text_marker.ns = "detected_armors_id";
+        text_marker.id = 30 + i;
+        text_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+        text_marker.action = visualization_msgs::msg::Marker::ADD;
+        text_marker.pose.position = detected_marker.pose.position;
+        text_marker.pose.position.z += 0.2;
+        text_marker.text = "InOdom:" + std::to_string(armor.id);
+        text_marker.scale.z = 0.1;
+        text_marker.color.a = 1.0;
+        text_marker.color.r = 1.0;
+        text_marker.color.g = 1.0;
+        text_marker.color.b = 1.0;
+        marker_array.markers.push_back(text_marker);
+        
+        i++;
+    }
+
     marker_pub_->publish(marker_array);
-}
-
-void OutpostNode::robotCallback(RmRobotMsg::SharedPtr robot_msg){
-    manager_.robot = *robot_msg;
-    // 更新自身ID
-    manager_.self_id = RmcvId(static_cast<RobotIdDji>(robot_msg->robot_id));
-    params_.rmcv_id = manager_.self_id;
-    last_mode = string2vision_mode(robot_msg->vision_mode); 
-    if (last_mode != VisionMode::OUTPOST_AIM && last_mode != VisionMode::AUTO_AIM && manager_.outpost.alive_ts > 0){
-        RCLCPP_INFO(this->get_logger(), "Reset-Outpost");
-        manager_.outpost = Outpost();
-        manager_.outpost.alive_ts = -1;
-        manager_.phase_initialized_ = false;
-        manager_.last_active_tracker_id_ = -1;
-        manager_.last_active_phase_ = -1;
-        manager_.last_active_yaw_ = 0.0;
-        manager_.last_active_ts_ = -1.0;
-    }
-    imu = manager_.robot.imu;
-
-    // 更新弹速（如果机器人消息中有） 严查
-    bool is_big_bullet = false;
-    if (robot_msg->bullet_velocity > 8.) {
-        is_big_bullet = params_.rmcv_id.robot_id == RobotId::ROBOT_HERO;
-    }else {
-        double bullet_velocity = is_big_bullet ? 12.0 : 22.9;
-    }
-    bac->refresh_velocity(is_big_bullet, robot_msg->bullet_velocity);
 }
 
 #include "rclcpp_components/register_node_macro.hpp"
