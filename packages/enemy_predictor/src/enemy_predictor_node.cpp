@@ -13,7 +13,7 @@ EnemyPredictorNode::EnemyPredictorNode(const rclcpp::NodeOptions& options)
     tf2_listener = std::make_shared<tf2_ros::TransformListener>(*tf2_buffer);
 
     detector_sub=create_subscription<vision_msgs::msg::Detection2DArray>(
-        "/vision/raw", rclcpp::QoS(10), std::bind(&EnemyPredictorNode::detection_callback, this, std::placeholders::_1));
+        "/vision/tracked", rclcpp::QoS(10), std::bind(&EnemyPredictorNode::detection_callback, this, std::placeholders::_1));
     //取决于电控给我发消息的频率, 要适配 HighFrequencyCallback()
     imu_sub=create_subscription<rm_msgs::msg::RmRobot>(
         "rm_robot", rclcpp::SensorDataQoS(), std::bind(&EnemyPredictorNode::robot_callback, this, std::placeholders::_1));
@@ -29,6 +29,9 @@ EnemyPredictorNode::EnemyPredictorNode(const rclcpp::NodeOptions& options)
     control_pub = create_publisher<rm_msgs::msg::Control>("enemy_predictor", rclcpp::SensorDataQoS());
     //high_freq_timer_ = this->create_wall_timer(std::chrono::milliseconds(2),  // 2ms = 500Hz
     //                                           std::bind(&EnemyPredictorNode::HighFrequencyCallback, this));
+
+     enemy_markers_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
+        "enemy_center_markers", 10);
     
     this->declare_parameter<std::vector<double>>("armor_ekf.P",std::vector<double>{0.025, 0.049, 0.001, 0.01, 0.01, 0.01});
     auto p_diag = this->get_parameter("armor_ekf.P").as_double_array();
@@ -101,7 +104,9 @@ EnemyPredictorNode::EnemyPredictorNode(const rclcpp::NodeOptions& options)
     bac.refresh_velocity(false, 30.0);
 
     RCLCPP_INFO(get_logger(), "shared_dir: %s", shared_dir.c_str());
-
+    for(int i = 0; i < MAX_ENEMIES; i++){
+        enemies_[i].class_id = i+1;
+    }
 }
 
 void EnemyPredictorNode::camera_callback(const sensor_msgs::msg::Image::ConstSharedPtr& image_msg, 
@@ -238,36 +243,41 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
         RCLCPP_WARN(get_logger(), "Empty Image Messages");
         return;
     }
+
+    std::vector<Detection, Eigen::aligned_allocator<Detection>> current_detections_{};
+    std::vector<int>active_enemies_idx{};
+    std::vector<int>active_armor_idx{};
     std::vector<cv::Point3f> object_points;
     time_det = this -> now();
     double timestamp = time_det.seconds();
     const auto& detections = detection_msg->detections;
     time_image = detection_msg-> header.stamp;
-
-    current_detections_.clear();
-    active_armor_idx.clear();
-    active_enemies_idx.clear();
+    
+    cmd.cmd_mode = -1;
+    for(Enemy& enemy : enemies_){
+        enemy.is_active = false;
+    }
 
     for (const auto& detection : detections) {
-        if(detection.bbox.size_x / detection.bbox.size_y < 0.5 || detection.bbox.size_x / detection.bbox.size_y > 4){
-            continue;
-        }
-        Detection det;
-        //det.armor_idx = std::stoi(detection.id);
-        det.armor_idx = 0;
+        //if(detection.bbox.size_x / detection.bbox.size_y < 0.5 || detection.bbox.size_x / detection.bbox.size_y > 4){
+        //    continue;
+        //}
+        Detection det{};
+        det.armor_idx = std::stoi(detection.id);
         
         const auto& results_ = detection.results;
+       
         for(const auto& res : results_){
             const auto& pos = res.pose;
+          
             det.position = Eigen::Vector3d(pos.pose.position.x, pos.pose.position.y, pos.pose.position.z) ;
             
             det.orientation = Eigen::Vector3d(pos.pose.orientation.x, pos.pose.orientation.y, pos.pose.orientation.z);
-            double current_yaw = 0.0;
-            if (getCurrentYaw(time_image, current_yaw)){
-                det.yaw = pos.pose.orientation.z + current_yaw;
-            }else{
-                RCLCPP_INFO(get_logger(),"No Current Yaw From Imu!!!");
-            }
+            double current_yaw = getCurrentYaw(time_image);
+           
+            det.yaw = pos.pose.orientation.z - current_yaw;
+            RCLCPP_INFO(get_logger(), "yaw_odom = %lf", det.yaw);
+           
             det.armor_class_id = std::stoi(res.hypothesis.class_id);
             
             if(det.armor_class_id % 10 == 1){
@@ -275,9 +285,11 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
             }else{
                 object_points = small_object_points;
             }
-            updateArmorDetection(object_points, det, time_image);
+           updateArmorDetection(object_points, det, time_image);
+            
         }
-        current_detections_.push_back(det);
+        current_detections_.emplace_back(det);
+
     }
     if(current_detections_.empty()){
         return;
@@ -285,20 +297,16 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
     //if (params_.mode != VisionMode::AUTO_AIM) {
      //    return;
      //}
-     double area_2d_ = 0.0;
-     for(const auto& det_ : current_detections_){
-        if(det_.area_2d > area_2d_){
-            current_detections_[0] = det_;
-        }
-     }
-    ToupdateArmors(current_detections_, timestamp);
-    EnemyManage(timestamp, time_image);
-    if (cmd.aim_center.x() != -999){
+    ToupdateArmors(current_detections_, timestamp, active_armor_idx);
+
+    EnemyManage(timestamp, time_image, active_enemies_idx, active_armor_idx);
+    
+    if (cmd.cmd_mode == 0 || cmd.cmd_mode == 1){
         rm_msgs::msg::Control control_msg{};
         control_msg.pitch = cmd.cmd_pitch;
         //RCLCPP_INFO(get_logger(), "cmd.cmd_pitch =%d", cmd.cmd_pitch);
         control_msg.flag = 1;
-        //control_msg.vision_follow_id = enemies_[cmd.target_enemy_id].type;
+        //control_msg.vision_follow_id = enemies_[cmd.target_enemy_idx].type;
         if(cmd.cmd_mode == 0){
            control_msg.rate = 0; // adjust it later!!!
            control_msg.one_shot_num = 0;
@@ -313,9 +321,15 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
             control_msg.yaw = cmd.cmd_yaw;
             publish_mode_ = PublishMode::FRAME_RATE_MODE;
             control_pub-> publish(std::move(control_msg));
+            RCLCPP_INFO(get_logger(), "Publish Control Msgs!");
         }else{
             publish_mode_ = PublishMode::HIGH_FREQ_MODE;
         }
+    }else{
+        RCLCPP_INFO(get_logger(), "No valid Control Msgs");
+    }
+    if (!enemy_markers_.markers.empty()) {
+        enemy_markers_pub_->publish(enemy_markers_);
     }
     cv::imshow("Armor_img", visualize_.armor_img);
     cv::waitKey(10);
@@ -327,9 +341,9 @@ void EnemyPredictorNode::robot_callback(const rm_msgs::msg::RmRobot::SharedPtr r
     params_.right_press = robot_msg->right_press;
     params_.right_press = false; // For Debug
     ImuData data;
-    data.timestamp = robot_msg->header.stamp;
+    data.timestamp = this->now();
     data.current_yaw = robot_msg->imu.yaw;
-
+  
     imu_buffer_.push_back(data);
 
     if (imu_buffer_.size() > 500) {

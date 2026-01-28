@@ -24,6 +24,8 @@ set(link Eigen3::Eigen ${link})
 find_package(cv_bridge REQUIRED)  # 添加这一行
 find_package(sensor_msgs REQUIRED)  # 添加这一行
 find_package(vision_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+
 find_package(rm_msgs REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(yaml-cpp REQUIRED)

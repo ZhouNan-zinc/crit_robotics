@@ -31,15 +31,14 @@ public:
     std::vector<double> weights_;
     std::vector<Vx> sample_X;
     std::vector<Vz> sample_Z;
+    std::vector<double> radius{0.25, 0.25};
+    //double radius;
     
     double last_timestamp_;
     bool is_initialized_;
 
     // 机器人特定参数
-    int armor_cnt_;
     double angle_dis_;
-    std::vector<double> const_radius_;
-    std::vector<double> const_z_;
 
     // 配置结构体
     struct CKFConfig {
@@ -58,16 +57,15 @@ public:
 
     // 重置滤波器
     void reset(const Eigen::Vector3d& position, double yaw, int _phase_id, 
-               int _armor_cnt, double _timestamp, 
-               std::vector<double> _radius, std::vector<double> _z);
+               double _timestamp);
     
     // 更新函数
     void update(const Eigen::Vector3d& position, double yaw, 
                 double _timestamp, int _phase_id);
     
     // 预测特定装甲板位置
-    Eigen::Vector3d predictArmorPosition(int phase_id, double predict_time);
-    
+    Eigen::Vector3d predictArmorPosition(double z, int phase_id, double dt, double timestamp);
+    Eigen::Vector3d predictCenterPosition(double z, double dt, double timestamp);
     // 初始化CKF
     void initializeCKF();
     

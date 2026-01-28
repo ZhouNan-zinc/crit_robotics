@@ -96,10 +96,10 @@
     
     # enemy_kf
     enemy_ckf.P: [1.0,1.0,1.0,1.0,1.0,1.0]
-    enemy_ckf.R_XYZ: 0.0025
-    enemy_ckf.R_YAW: 0.0029
-    enemy_ckf.Q2_XY: 85.0
-    enemy_ckf.Q2_YAW: 85.0
+    enemy_ckf.R_XYZ: 0.1
+    enemy_ckf.R_YAW: 0.05
+    enemy_ckf.Q2_XY: 0.01
+    enemy_ckf.Q2_YAW: 0.005
     standard_dis: 0.17
     balance_dis: 0.2
 
