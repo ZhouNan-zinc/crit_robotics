@@ -209,6 +209,7 @@ public:
     Ballistic bac;
     Ballistic::BallisticParams create_ballistic_params();
     RmcvId self_id;
+    double yaw_now = 0.0;
     
     //YawTrajectoryPlanner yaw_planner;
    

@@ -87,11 +87,9 @@ void EnemyPredictorNode::updateArmorDetection(std::vector<cv::Point3f> object_po
 
     Eigen::Vector3d camera_tvec_eigen = Eigen::Map<Eigen::Vector3d>(visualize_.camera_tvec.ptr<double>());
     visualize_.camara_to_odom = getTrans("camera_optical_frame", "odom", timestamp_image);
-    //RCLCPP_INFO(get_logger(), "armor_cam: %f, %f, %f", det.position[0], det.position[1], det.position[2]);
     
     det.position = visualize_.camara_to_odom * det.position;  //camera to odom
     visualizeAimCenter(det.position, cv::Scalar(225, 0, 225));
-    //RCLCPP_INFO(get_logger(), "armor_odom: %f, %f, %f", det.position[0], det.position[1], det.position[2]);
 }
 //--------------------------------Tracking with Armor Filter--------------------------------------------------
 EnemyPredictorNode::ArmorTracker::ArmorTracker(int tracker_idx, 
@@ -251,9 +249,7 @@ void EnemyPredictorNode::EnemyManage(double timestamp, rclcpp::Time timestamp_im
                 //那么此时的enemy.center不准，但是choose enemy的时候需要使用enemy.center
                 RCLCPP_INFO(get_logger(),"Start To Choose Target");
                 Eigen::Vector3d enemy_center_cam = visualize_.camara_to_odom.inverse() *enemies_[active_enemies_idx[i]].center;
-                //RCLCPP_INFO(get_logger(), "Enemy center in camera frame: x=%.3f, y=%.3f, z=%.3f", 
-                //enemy_center_cam.x(), enemy_center_cam.y(), enemy_center_cam.z());
-
+               
                 // DEBUG!!!!!!!!!!!! odom to camera ,but distance???????? 
                 std::vector<cv::Point2f> reprojected_points;
                 std::vector<cv::Point3f> points_3d;
@@ -622,10 +618,6 @@ void EnemyPredictorNode::calculateEnemyCenterAndRadius(Enemy& enemy, double time
     
 void EnemyPredictorNode::findBestPhaseForEnemy(Enemy& enemy, ArmorTracker& tracker, std::vector<ArmorTracker*> active_armors_this_enemy) {
 
-    
-    //if(tracker.phase_id != -1){
-    //    return;
-    //}
     if(!enemy.is_valid){
         tracker.phase_id = 0;
         enemy.yaw = tracker.yaw;
@@ -884,7 +876,8 @@ void EnemyPredictorNode::getCommand(Enemy& enemy, double timestamp, rclcpp::Time
         
         else{
             ArmorTracker* best_tracker = nullptr;
-            double yaw_need = 1.05;
+            double yaw_need_min = 1.05;
+            double yaw = 0.0;
             double pitch_need = 0.0;
             
             for (ArmorTracker* tracker : active_trackers) {
@@ -895,22 +888,21 @@ void EnemyPredictorNode::getCommand(Enemy& enemy, double timestamp, rclcpp::Time
                     timestamp,
                     predict_func_double
                 );
-                if(ball_res.yaw < yaw_need){
-                    yaw_need = ball_res.yaw;
+                if(abs(ball_res.yaw - yaw_now) < abs(yaw_need_min)){
+                    yaw_need_min = ball_res.yaw - yaw_now;
                     pitch_need = ball_res.pitch;
+                    yaw = ball_res.yaw;
                 }
                 
             }
-            if(yaw_need < 1.05){
-                cmd.cmd_yaw = ball_res.yaw;
+            if(abs(yaw_need_min - yaw_now) < 1.05){
+                cmd.cmd_yaw = yaw;
                 cmd.cmd_pitch = pitch_need;
             }else{
                 cmd.cmd_mode = -1;
             }
         }
     }
-    //RCLCPP_INFO_STREAM(get_logger(), "cmd.cmd_yaw:" << cmd.cmd_yaw);
-    //RCLCPP_INFO_STREAM(get_logger(), "cmd.cmd_pitch:" << cmd.cmd_pitch);
 }
 std::pair<Ballistic::BallisticResult, Eigen::Vector3d> EnemyPredictorNode::calc_ballistic_
             (double delay, rclcpp::Time timestamp_image, ArmorTracker& tracker, double timestamp,
@@ -936,10 +928,6 @@ std::pair<Ballistic::BallisticResult, Eigen::Vector3d> EnemyPredictorNode::calc_
         //RCLCPP_INFO(this->get_logger(), "latency time: %.6f", latency);
         predict_pos_odom = _predict_func(tracker, t_fly + latency, timestamp);
     } 
-    
-    //RCLCPP_INFO_STREAM(get_logger(), "predict_pos_odom: " << predict_pos_odom(0) << ", " << predict_pos_odom(1) << ", " << predict_pos_odom(2));
-    
-    //visualizeAimCenter(predict_pos_odom, cv::Scalar(0, 0, 255));
     ball_res = bac.final_ballistic(odom2gimbal_transform, predict_pos_odom);
 
     if (ball_res.fail) {
@@ -1002,7 +990,7 @@ Eigen::Vector3d EnemyPredictorNode::FilterManage(Enemy &enemy, double dt, ArmorT
     
     Eigen::Vector3d fusion_pre = w_ekf * xyz_ekf_pre + w_ckf * xyz_pre_ckf;
     //RCLCPP_INFO(get_logger(), "fusion_pre : %lf, %lf, %lf",fusion_pre(0),fusion_pre(1),fusion_pre(2));
-    //visualizeAimCenter(fusion_pre, cv::Scalar(0, 0, 255));
+    visualizeAimCenter(fusion_pre, cv::Scalar(0, 0, 255));
 
         
     // =================== 添加滤波器可视化到rviz ===================

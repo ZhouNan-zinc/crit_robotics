@@ -155,7 +155,7 @@
     # 弹道参数
     # # 分别五个值分别对应9，15，16，18，30弹速的弹道参数
     ballistic.stored_yaw_offset: [0.0, 0.0, 0.0, -0.2, -0.2]
-    ballistic.stored_pitch_offset: [0.0, 0.0, -0.8, -1.2, -1.5] # enemy
+    ballistic.stored_pitch_offset: [0.0, 0.0, -0.8, -1.6, -1.6] # enemy
     # 在stored_pitch_offset的基础上，对低打高和高打低的额外补偿
     pitch_offset_high_hit_low: 0.0
     pitch_offset_low_hit_high: 0.0

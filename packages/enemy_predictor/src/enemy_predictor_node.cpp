@@ -360,7 +360,7 @@ void EnemyPredictorNode::robot_callback(const rm_msgs::msg::RmRobot::SharedPtr r
     ImuData data;
     data.timestamp = this->now();
     data.current_yaw = robot_msg->imu.yaw;
-  
+    yaw_now = robot_msg->imu.yaw;
     imu_buffer_.push_back(data);
 
     if (imu_buffer_.size() > 500) {
