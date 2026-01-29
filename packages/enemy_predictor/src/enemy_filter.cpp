@@ -27,9 +27,9 @@ void EnemyCKF::reset(const Eigen::Vector3d& position, double yaw, int _phase_id,
     
     // 直接初始化状态向量
     Xe = Vx::Zero();
-    Xe[0] = position.x() - radius[_phase_id % 2] * cos(yaw + _phase_id * angle_dis_); // x
+    Xe[0] = position.x() + radius[_phase_id % 2] * cos(yaw); // x
     Xe[1] = 0;  // vx
-    Xe[2] = position.y() - radius[_phase_id % 2] * sin(yaw + _phase_id * angle_dis_); // y
+    Xe[2] = position.y() - radius[_phase_id % 2] * sin(yaw); // y
     Xe[3] = 0;  // vy
     Xe[4] = yaw;  // yaw
     Xe[5] = 0;  // omega
@@ -40,7 +40,6 @@ void EnemyCKF::reset(const Eigen::Vector3d& position, double yaw, int _phase_id,
     is_initialized_ = true;
 }
 
-// 更新函数 - 直接接受位置和yaw，不再需要Observe结构体
 void EnemyCKF::update(const Eigen::Vector3d& position, double yaw, 
             double _timestamp, int _phase_id) {
     
@@ -61,7 +60,7 @@ Eigen::Vector3d EnemyCKF:: predictArmorPosition(double z, int phase_id, double d
 
     //Vx predicted_state = f(Xe, timestamp + dt);
     
-    double pred_x = Xe[0] + Xe[1]*dt + radius[phase_id % 2]* cos(Xe[4] + phase_id * angle_dis_);
+    double pred_x = Xe[0] + Xe[1]*dt - radius[phase_id % 2]* cos(Xe[4] + phase_id * angle_dis_);
     double pred_y = Xe[2] + Xe[3]*dt + radius[phase_id % 2]* sin(Xe[4] + phase_id * angle_dis_);
     double pred_z = z;
     
@@ -132,6 +131,7 @@ void EnemyCKF::predict(double timestamp) {
     Pp += Q;
 }
 void EnemyCKF::measure(const Vz& z, int phase_id) {
+
     calcR(z);
     
     Zp = Vz::Zero();
@@ -166,9 +166,9 @@ EnemyCKF::Vx EnemyCKF::f(const Vx& x, double timestamp) const {
 }
 EnemyCKF::Vz EnemyCKF::h(const Vx& x, int phase_id) const {
     Vz result;
-    result[0] = x[0] + radius[phase_id % 2]* cos(x[4] + phase_id * angle_dis_);  // x
+    result[0] = x[0] - radius[phase_id % 2]* cos(x[4] + phase_id * angle_dis_);  // x
     result[1] = x[2] + radius[phase_id % 2]* sin(x[4] + phase_id * angle_dis_);  // y
-    result[2] = x[4];  // yaw
+    result[2] = x[4] + phase_id * angle_dis_;;  // yaw
     return result;
 }
 void EnemyCKF::calcQ(double dt) {

@@ -259,9 +259,10 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
     }
 
     for (const auto& detection : detections) {
-        //if(detection.bbox.size_x / detection.bbox.size_y < 0.5 || detection.bbox.size_x / detection.bbox.size_y > 4){
-        //    continue;
-        //}
+        bool valid_det = true;
+        if(detection.bbox.size_x / detection.bbox.size_y < 0.5 || detection.bbox.size_x / detection.bbox.size_y > 4){
+            continue;
+        }
         Detection det{};
         det.armor_idx = std::stoi(detection.id);
         
@@ -273,10 +274,13 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
             det.position = Eigen::Vector3d(pos.pose.position.x, pos.pose.position.y, pos.pose.position.z) ;
             
             det.orientation = Eigen::Vector3d(pos.pose.orientation.x, pos.pose.orientation.y, pos.pose.orientation.z);
+            
+            if(abs(pos.pose.orientation.z) > 1.05){
+                valid_det = false;
+            }
             double current_yaw = getCurrentYaw(time_image);
            
             det.yaw = pos.pose.orientation.z - current_yaw;
-            RCLCPP_INFO(get_logger(), "yaw_odom = %lf", det.yaw);
            
             det.armor_class_id = std::stoi(res.hypothesis.class_id);
             
@@ -285,10 +289,12 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
             }else{
                 object_points = small_object_points;
             }
-           updateArmorDetection(object_points, det, time_image);
-            
+           //updateArmorDetection(object_points, det, time_image);
         }
-        current_detections_.emplace_back(det);
+        if(valid_det){
+            updateArmorDetection(object_points, det, time_image);
+            current_detections_.emplace_back(det);
+        }
 
     }
     if(current_detections_.empty()){
@@ -298,36 +304,47 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
      //    return;
      //}
     ToupdateArmors(current_detections_, timestamp, active_armor_idx);
-
+   
     EnemyManage(timestamp, time_image, active_enemies_idx, active_armor_idx);
-    
+
+    rm_msgs::msg::Control control_msg{};
+   
     if (cmd.cmd_mode == 0 || cmd.cmd_mode == 1){
-        rm_msgs::msg::Control control_msg{};
+
         control_msg.pitch = cmd.cmd_pitch;
         //RCLCPP_INFO(get_logger(), "cmd.cmd_pitch =%d", cmd.cmd_pitch);
         control_msg.flag = 1;
-        //control_msg.vision_follow_id = enemies_[cmd.target_enemy_idx].type;
+        control_msg.vision_follow_id = enemies_[cmd.target_enemy_idx].class_id;
         if(cmd.cmd_mode == 0){
-           control_msg.rate = 0; // adjust it later!!!
-           control_msg.one_shot_num = 0;
+           control_msg.rate = 15; // adjust it later!!!
+           control_msg.one_shot_num = 3;
         }
         else if(cmd.cmd_mode == 1){
-           control_msg.rate = 0;
-           control_msg.one_shot_num = 0;
+           control_msg.rate = 18;
+           control_msg.one_shot_num = 3;
         }
         //bool success = yaw_planner.setTargetYaw(cmd.cmd_yaw, imu_.current_yaw);
         bool success = false;    //先把自瞄调通
         if(!success){
             control_msg.yaw = cmd.cmd_yaw;
             publish_mode_ = PublishMode::FRAME_RATE_MODE;
-            control_pub-> publish(std::move(control_msg));
             RCLCPP_INFO(get_logger(), "Publish Control Msgs!");
         }else{
             publish_mode_ = PublishMode::HIGH_FREQ_MODE;
         }
-    }else{
-        RCLCPP_INFO(get_logger(), "No valid Control Msgs");
+        control_pub-> publish(std::move(control_msg));
     }
+    //else{
+    //    control_msg.flag = 0;
+    //    control_msg.yaw = 0.0;
+    //    control_msg.pitch = 0.0;
+    //    control_msg.rate = 0;
+    //    control_msg.one_shot_num = 0;
+//
+    //    RCLCPP_INFO(get_logger(), "No valid Control Msgs");
+    //}
+    //control_pub-> publish(std::move(control_msg));
+
     if (!enemy_markers_.markers.empty()) {
         enemy_markers_pub_->publish(enemy_markers_);
     }

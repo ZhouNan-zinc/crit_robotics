@@ -62,12 +62,12 @@ public:
     struct ArmorTracker {
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW
         
-        //bool is_valid = true;
         bool is_active = true;
         int tracker_idx;
         int armor_class_id;
   
         int missing_frames = 0;
+        int phase_id_cnt = 0;
         
         Eigen::Vector3d position;
         Eigen::Vector3d last_position;
@@ -118,7 +118,7 @@ public:
         std::vector<double> radius{0.25, 0.25};
         bool radius_cal = false;
         bool is_active = false;
-        bool is_valid = true;
+        bool is_valid = false;
         int missing_frame = 0;
         double yaw = 0.0; 
 
@@ -262,14 +262,14 @@ public:
     void EnemyManage(double timestamp, rclcpp::Time timestamp_det, std::vector<int>& active_enemies_idx, std::vector<int>& active_armor_idx);
 private:
     // 敌人分配和更新
-    void assignToEnemy(ArmorTracker& tracker, double timestamp, std::vector<int>& active_armor_idx);
+    void updateEnemy(Enemy& enemy, double timestamp, std::vector<int>& active_armor_idx);
 
     void updateSingleEnemy(Enemy& enemy, double timestamp);
-    void calculateEnemyCenterAndRadius(Enemy& enemy, double timestamp, std::vector<int>& active_armor_idx);
+    void calculateEnemyCenterAndRadius(Enemy& enemy, double timestamp, std::vector<ArmorTracker*> active_armors_this_enemy);
     Eigen::Vector3d FilterManage(Enemy &enemy, double dt, ArmorTracker& tracker, double timestamp);
     // 相位处理
     //void updateArmorPhase(Enemy& enemy, ArmorTracker& tracker, double timestamp);
-    void findBestPhaseForEnemy(Enemy& enemy, ArmorTracker& tracker, std::vector<int>& active_armor_idx);
+    void findBestPhaseForEnemy(Enemy& enemy, ArmorTracker& tracker,  std::vector<ArmorTracker*> active_armors_this_enemy);
     int estimatePhaseFromPosition(const Enemy& enemy, const ArmorTracker& tracker);
     // 决策 + 弹道
     std::pair<Ballistic::BallisticResult, Eigen::Vector3d> calc_ballistic_(double delay, rclcpp::Time timestamp_det, ArmorTracker& tracker, double timestamp, std::function<Eigen::Vector3d(ArmorTracker&, double, double)> _predict_func);
