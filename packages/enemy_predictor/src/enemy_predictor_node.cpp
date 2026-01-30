@@ -57,15 +57,17 @@ EnemyPredictorNode::EnemyPredictorNode(const rclcpp::NodeOptions& options)
 
     this->declare_parameter<std::vector<double>>("enemy_ckf.Pe",
                                                 std::vector<double>{
-                                                    0.25,   0.10,   0.03,   0.01,   0.02,   0.00,
-                                                    0.10,   1.00,   0.01,   0.02,   0.00,   0.00,
-                                                    0.03,   0.01,   0.25,   0.10,   0.02,   0.00,
-                                                    0.01,   0.02,   0.10,   1.00,   0.00,   0.00,
-                                                    0.02,   0.00,   0.02,   0.00,   0.04,   0.05,
-                                                    0.00,   0.00,   0.00,   0.00,   0.05,   0.25
+                                                   0.25,  0.02,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
+                                                   0.02,  0.64,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
+                                                   0.00,  0.00,  0.25,  0.02,  0.00,  0.00,  0.00,  0.00,
+                                                   0.00,  0.00,  0.02,  0.64,  0.00,  0.00,  0.00,  0.00,
+                                                   0.00,  0.00,  0.00,  0.00,  0.09,  0.03,  0.00,  0.00,
+                                                   0.00,  0.00,  0.00,  0.00,  0.03,  0.25,  0.00,  0.00,
+                                                   0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.04,  0.00,
+                                                   0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.04   
                                                 });
     auto pe = this->get_parameter("enemy_ckf.Pe").as_double_array();
-    EnemyCKF::config_.config_Pe = Eigen::Map<Eigen::MatrixXd>(pe.data(),6,6);
+    EnemyCKF::config_.config_Pe = Eigen::Map<Eigen::MatrixXd>(pe.data(),8,8);
 
     this->declare_parameter<double>("enemy_ckf.Q2_X", 0.01);
     EnemyCKF::config_.Q2_X = this->get_parameter("enemy_ckf.Q2_X").as_double();
@@ -81,6 +83,9 @@ EnemyPredictorNode::EnemyPredictorNode(const rclcpp::NodeOptions& options)
 
     this->declare_parameter<double>("enemy_ckf.R_YAW", 0.01);
     EnemyCKF::config_.R_YAW = this->get_parameter("enemy_ckf.R_YAW").as_double();
+
+    this->declare_parameter<double>("enemy_ckf.Q_r", 0.01);
+    EnemyCKF::config_.Q_r = this->get_parameter("enemy_ckf.Q_r").as_double();
     
     this->declare_parameter<double>("interframe_dis_thresh", 0.04617);
     interframe_dis_thresh = this->get_parameter("interframe_dis_thresh").as_double();

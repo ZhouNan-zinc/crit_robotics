@@ -23,16 +23,18 @@ EnemyCKF::EnemyCKF() : sample_num_(2 * STATE_NUM), is_initialized_(false) {
 }
 void EnemyCKF::reset(const Eigen::Vector3d& position, double yaw, int _phase_id, 
                     double _timestamp) {
-    angle_dis_ = 2 * M_PI / 4;
+    angle_dis_ = M_PI / 2;
     
     // 直接初始化状态向量
     Xe = Vx::Zero();
-    Xe[0] = position.x() + radius[_phase_id % 2] * cos(yaw); // x
+    Xe[0] = position.x() + initial_radius[_phase_id % 2] * cos(yaw); // x
     Xe[1] = 0;  // vx
-    Xe[2] = position.y() - radius[_phase_id % 2] * sin(yaw); // y
+    Xe[2] = position.y() - initial_radius[_phase_id % 2] * sin(yaw); // y
     Xe[3] = 0;  // vy
     Xe[4] = yaw;  // yaw
     Xe[5] = 0;  // omega
+    Xe[6] = initial_radius[0];  // r1
+    Xe[7] = initial_radius[1];  // r2
     
     Pe = config_.config_Pe;
     Pp = Mxx::Identity();
@@ -49,8 +51,9 @@ void EnemyCKF::update(const Eigen::Vector3d& position, double yaw,
     z << position.x(), position.y(), yaw;
     
     predict(_timestamp);
-    SRCR_sampling(Xp, Pp);
+
     measure(z, _phase_id);
+
     correct(z);
     
     last_timestamp_ = _timestamp;
@@ -59,9 +62,10 @@ void EnemyCKF::update(const Eigen::Vector3d& position, double yaw,
 Eigen::Vector3d EnemyCKF:: predictArmorPosition(double z, int phase_id, double dt, double timestamp) {   //先保留 timestamp 的接口
 
     //Vx predicted_state = f(Xe, timestamp + dt);
+    double current_radius = Xe[6 + (phase_id % 2)];
     
-    double pred_x = Xe[0] + Xe[1]*dt - radius[phase_id % 2]* cos(Xe[4] + phase_id * angle_dis_);
-    double pred_y = Xe[2] + Xe[3]*dt + radius[phase_id % 2]* sin(Xe[4] + phase_id * angle_dis_);
+    double pred_x = Xe[0] + Xe[1]*dt - current_radius* cos(Xe[4] + Xe[5]*dt + phase_id * angle_dis_);
+    double pred_y = Xe[2] + Xe[3]*dt + current_radius* sin(Xe[4] + Xe[5]*dt + phase_id * angle_dis_);
     double pred_z = z;
     
     return Eigen::Vector3d(pred_x, pred_y, pred_z);
@@ -132,6 +136,8 @@ void EnemyCKF::predict(double timestamp) {
 }
 void EnemyCKF::measure(const Vz& z, int phase_id) {
 
+    SRCR_sampling(Xp, Pp);
+
     calcR(z);
     
     Zp = Vz::Zero();
@@ -165,10 +171,13 @@ EnemyCKF::Vx EnemyCKF::f(const Vx& x, double timestamp) const {
     return ans;
 }
 EnemyCKF::Vz EnemyCKF::h(const Vx& x, int phase_id) const {
+    
     Vz result;
-    result[0] = x[0] - radius[phase_id % 2]* cos(x[4] + phase_id * angle_dis_);  // x
-    result[1] = x[2] + radius[phase_id % 2]* sin(x[4] + phase_id * angle_dis_);  // y
-    result[2] = x[4] + phase_id * angle_dis_;;  // yaw
+    double current_radius = x[6 + (phase_id % 2)];
+
+    result[0] = x[0] - current_radius* cos(x[4] + phase_id * angle_dis_);  // x
+    result[1] = x[2] + current_radius* sin(x[4] + phase_id * angle_dis_);  // y
+    result[2] = x[4] + phase_id * angle_dis_;  // yaw
     return result;
 }
 void EnemyCKF::calcQ(double dt) {
@@ -190,11 +199,22 @@ void EnemyCKF::calcQ(double dt) {
     double q_yaw_yaw = dTs[3] / 3 * config_.Q2_YAW;
     double q_yaw_omega = dTs[2] / 2 * config_.Q2_YAW;
     double q_omega_omega = dTs[1] * config_.Q2_YAW;
+
+    double radius_cov_avg = (Pe(6, 6) + Pe(7, 7)) / 2.0;
+    double cov_factor = std::min(1.0, 10.0 * radius_cov_avg);  // 协方差大时保持较大Q
+    double q_radius = config_.Q_r * dt * cov_factor;
+    
+    // 设置最小值和最大值
+    q_radius = std::max(q_radius, 1e-8 * dt);  // 最小值
+    q_radius = std::min(q_radius, config_.Q_r * dt * 5.0);  // 最大值（5倍基础值）
     
     Q = Mxx::Zero();
     Q.block(0, 0, 2, 2) << q_x_x, q_x_vx, q_x_vx, q_vx_vx;
     Q.block(2, 2, 2, 2) << q_y_y, q_y_vy, q_y_vy, q_vy_vy;
     Q.block(4, 4, 2, 2) << q_yaw_yaw, q_yaw_omega, q_yaw_omega, q_omega_omega;
+
+    Q(6, 6) = q_radius;
+    Q(7, 7) = q_radius;
 }
 void EnemyCKF::calcR(const Vz& z) {
     Vz R_vec;
