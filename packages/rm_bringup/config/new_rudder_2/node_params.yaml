@@ -98,8 +98,8 @@
     enemy_ckf.P: [0.1 ,0.1 ,0.1 ,0.1 ,0.1, 0.1]
     enemy_ckf.R_XYZ: 0.05
     enemy_ckf.R_YAW: 0.5
-    enemy_ckf.Q2_XY: 50.0
-    enemy_ckf.Q2_YAW: 50.0
+    enemy_ckf.Q2_XY: 84.0
+    enemy_ckf.Q2_YAW: 84.0
     standard_dis: 0.17
     balance_dis: 0.2
 
@@ -144,7 +144,7 @@
     pitch_error_dis_thresh: 0.06          #自动发弹阈值，目标上下小陀螺时pitch限制
     choose_enemy_without_autoaim_signal: false  #在没有收到右键信号的时候也选择目标（调试用）
     # 延迟参数
-    response_delay: 0.1                  #系统延迟(程序+通信+云台响应)
+    response_delay: 0.2                 #系统延迟(程序+通信+云台响应)
     shoot_delay: 0.08                     #发弹延迟
 
     enemy_radius_cache_reset_time: 45.0
@@ -155,7 +155,7 @@
     # 弹道参数
     # # 分别五个值分别对应9，15，16，18，30弹速的弹道参数
     ballistic.stored_yaw_offset: [0.0, 0.0, 0.0, -0.2, -0.2]
-    ballistic.stored_pitch_offset: [0.0, 0.0, -0.8, -1.6, -1.6] # enemy
+    ballistic.stored_pitch_offset: [-0.5, -1.5, -2.0, -3.0, -3.5] # enemy
     # 在stored_pitch_offset的基础上，对低打高和高打低的额外补偿
     pitch_offset_high_hit_low: 0.0
     pitch_offset_low_hit_high: 0.0

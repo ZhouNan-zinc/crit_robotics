@@ -914,19 +914,18 @@ std::pair<Ballistic::BallisticResult, Eigen::Vector3d> EnemyPredictorNode::calc_
     Eigen::Isometry3d odom2gimbal_transform = getTrans("odom", "gimbal", timestamp_image);
     double t_fly = 0.0;  // 飞行时间（迭代求解）
 
-    auto tick = std::chrono::steady_clock::now();
-    auto tick_duration = tick.time_since_epoch();
-    double tick_seconds = std::chrono::duration<double>(tick_duration).count();
+    rclcpp::Time tick = this->now();
 
     for (int i = 0; i < 6; ++i) {
-        auto tock = std::chrono::steady_clock::now();
-        auto tock_duration = tock.time_since_epoch();
-        double tock_seconds = std::chrono::duration<double>(tock_duration).count();
-        // 计算时间差（秒）
-        std::chrono::duration<double> elapsed = tock - tick;
-        double latency = delay + elapsed.count();
+        rclcpp::Time tock = this->now();
+
+        rclcpp::Duration elapsed = tock - tick;
+        
+        double latency = delay + elapsed.seconds();
+
+        double code_dt = tock.seconds() - timestamp_image.seconds();
         //RCLCPP_INFO(this->get_logger(), "latency time: %.6f", latency);
-        predict_pos_odom = _predict_func(tracker, t_fly + latency, timestamp);
+        predict_pos_odom = _predict_func(tracker, t_fly + latency + code_dt, timestamp);
     } 
     ball_res = bac.final_ballistic(odom2gimbal_transform, predict_pos_odom);
 

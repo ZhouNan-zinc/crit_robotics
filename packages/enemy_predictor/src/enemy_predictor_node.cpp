@@ -220,7 +220,7 @@ Ballistic::BallisticParams EnemyPredictorNode::create_ballistic_params() {
         
         // 设置默认的偏移量
         params.stored_yaw_offset = std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0};
-        params.stored_pitch_offset = std::vector<double>{0.0, 0.0, 0.0, 0.0, 0.0};
+        params.stored_pitch_offset = std::vector<double>{0.0, 0.0, -0.4, -0.5, -0.8};
      
         params.yaw2gun_offset = sqrt(params.pitch2yaw_t[0] * params.pitch2yaw_t[0] + params.pitch2yaw_t[1] * params.pitch2yaw_t[1]);    
         RCLCPP_INFO(this->get_logger(), "params.yaw2gun_offset = %lf",params.yaw2gun_offset);
@@ -316,12 +316,12 @@ void EnemyPredictorNode::detection_callback(const vision_msgs::msg::Detection2DA
         control_msg.flag = 1;
         control_msg.vision_follow_id = enemies_[cmd.target_enemy_idx].class_id;
         if(cmd.cmd_mode == 0){
-           control_msg.rate = 15; // adjust it later!!!
-           control_msg.one_shot_num = 3;
+           control_msg.rate = 18; // adjust it later!!!
+           control_msg.one_shot_num = 1;
         }
         else if(cmd.cmd_mode == 1){
            control_msg.rate = 18;
-           control_msg.one_shot_num = 3;
+           control_msg.one_shot_num = 1;
         }
         //bool success = yaw_planner.setTargetYaw(cmd.cmd_yaw, imu_.current_yaw);
         bool success = false;    //先把自瞄调通
