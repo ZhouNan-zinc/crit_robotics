@@ -1349,7 +1349,7 @@ class Yolov10PoseModel(PreTrainedModel):
             results = results[0]
             
         # HACK: do not support batch
-        outputs = np.concat((xyxy2cxcywh(results[:, :4]), results[:, 4:]), axis=1)
+        outputs = np.concatenate((xyxy2cxcywh(results[:, :4]), results[:, 4:]), axis=1)
 
         return outputs
 

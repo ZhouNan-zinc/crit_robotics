@@ -10,7 +10,7 @@ import torch
 import openvino as ov
 import numpy as np
 from rclpy.node import Node
-from rclpy.logging import RcutilsLogger
+from rclpy.impl.rcutils_logger import RcutilsLogger
 from rclpy.qos import (
     QoSProfile,
     QoSHistoryPolicy,
@@ -183,7 +183,7 @@ class YoloPoseDetector(DetectorNodeInterface):
         
         intermediate_model = ppp.build()
 
-        self.ov_model = ov.compile_model(intermediate_model, device_name="AUTO")
+        self.ov_model = ov.compile_model(intermediate_model, device_name="CPU")
 
         super().__init__()
 

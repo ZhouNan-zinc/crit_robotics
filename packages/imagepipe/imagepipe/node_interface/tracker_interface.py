@@ -5,7 +5,7 @@ from abc import abstractmethod, ABC
 import cv2
 from rclpy.node import Node
 from rclpy.time import Time
-from rclpy.logging import RcutilsLogger
+from rclpy.impl.rcutils_logger import RcutilsLogger
 from rclpy.qos import (
     QoSProfile,
     QoSHistoryPolicy,

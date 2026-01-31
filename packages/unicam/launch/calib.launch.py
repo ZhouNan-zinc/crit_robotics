@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, StringJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
@@ -45,6 +45,6 @@ def generate_launch_description() -> LaunchDescription:
             output='both',
             emulate_tty=True,
             arguments=['--size', size,'--square', square, '--no-service-check'],
-            remappings=[('camera',StringJoinSubstitution(['/', camera])), ('image',StringJoinSubstitution(['/', image]))]
+            remappings=[('camera', PathJoinSubstitution(['/', camera])), ('image', PathJoinSubstitution(['/', image]))]
         )
     ])

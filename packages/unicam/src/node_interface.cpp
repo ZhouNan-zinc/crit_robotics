@@ -98,7 +98,7 @@ CameraNodeInterface::CameraNodeInterface()
         }
     };
 
-    timer = create_timer(timeout, daemon);
+    timer = this->create_wall_timer(timeout, daemon);
     
 }
 
@@ -151,11 +151,12 @@ void CameraNodeInterface::publish(cv::Mat image)
         /// NOTE: using copy assignment can decline copy time from 2ms to 0.3ms
         cimage.data.assign(image.data, image.data + image.cols * image.elemSize() * image.rows);
 
-        camera_pub->publish(
-            std::make_unique<sensor_msgs::msg::Image>(std::move(cimage)),
-            std::make_unique<sensor_msgs::msg::CameraInfo>(std::move(cinfo)),
-            now()
-        );
+        auto img_ptr = std::make_shared<sensor_msgs::msg::Image>(std::move(cimage));
+        auto info_msg = std::move(cinfo);
+
+        // Use CameraPublisher overload that accepts image, camera info and timestamp
+        auto ts = now();
+        camera_pub->publish(*img_ptr, info_msg, ts);
     });
 }
 
