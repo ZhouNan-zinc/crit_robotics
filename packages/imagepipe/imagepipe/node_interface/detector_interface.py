@@ -43,10 +43,10 @@ from ..solutions.pose_estimate import pose_estimate
 
 
 SMALL_ARMOR_POINTS: list[tuple[float, float, float]] = [
-    (-6.75e-2, -2.75e-2, 1e-6),
-    (-6.75e-2, 2.75e-2, 1e-6),
-    (6.75e-2, 2.75e-2, 1e-6),
-    (6.75e-2, -2.75e-2, 1e-6),
+    (-6.5e-2, -2.85e-2, 0),
+    (-6.5e-2, 2.85e-2, 0),
+    (6.5e-2, 2.85e-2, 0),
+    (6.5e-2, -2.85e-2, 0),
 ]
 BIG_ARMOR_POINTS: list[tuple[float, float, float]] = []
 BASE_POINTS: list[tuple[float, float, float]] = []

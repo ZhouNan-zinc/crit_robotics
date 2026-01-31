@@ -13,7 +13,7 @@
 #include <geometry_msgs/msg/pose.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <image_transport/image_transport.hpp>
-#include <cv_bridge/cv_bridge.hpp>
+#include <cv_bridge/cv_bridge.h>
 #include <visualization_msgs/msg/marker_array.hpp>
 
 #include "outpostaim/outpost_estimator.h"

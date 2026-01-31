@@ -52,7 +52,7 @@ target_link_libraries(
   ${PROJECT_NAME} 
   cv_bridge::cv_bridge
   image_transport::image_transport
-  yaml-cpp::yaml-cpp
+  yaml-cpp
   ${link} ${CERES_LIBRARIES}
 )
 

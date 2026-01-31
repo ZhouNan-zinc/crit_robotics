@@ -4,6 +4,7 @@ import copy
 import numpy as np
 import torch
 import torch.nn as nn
+import torchvision
 from torchvision.transforms.v2 import functional as F
 
 from PIL.Image import Image
@@ -1067,7 +1068,7 @@ class v10Pose(Pose):
         self.cv2 = self.cv3 = nn.ModuleList([nn.Identity()] * self.nl)
 
 
-def end2end_fastnms(
+def non_max_suppresson(
     prediction: torch.Tensor,
     conf_thres: float = 0.25,
     iou_thres: float = 0.45,
@@ -1100,7 +1101,7 @@ def end2end_fastnms(
     output = [pred[pred[:, 4] > conf_thres][:max_det] for pred in prediction]
     if classes is not None:
         output = [pred[(pred[:, 5:6] == classes).any(1)] for pred in output]
-    return output
+    return [out[torchvision.ops.nms(out[:, 0:4], out[:, 4], iou_threshold=iou_thres)] for out in output]
 
 
 def xyxy2cxcywh(bbox: np.ndarray):
@@ -1340,8 +1341,9 @@ class Yolov10PoseModel(PreTrainedModel):
         if prediction.ndim == 2:
             prediction = [prediction]
 
+        prediction = torch.tensor(prediction)
 
-        results = end2end_fastnms(prediction)
+        results = non_max_suppresson(prediction)
 
         if len(results) == 1:
             results = results[0]

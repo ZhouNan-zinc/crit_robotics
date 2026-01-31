@@ -7,7 +7,7 @@
 
 class EnemyCKF {
 public:
-    static const int STATE_NUM = 6;  // [x, vx, y, vy, yaw, vyaw]
+    static const int STATE_NUM = 8;  // [x, vx, y, vy, yaw, vyaw, r1, r2]
     static const int OBSERVE_NUM = 3; // [x, y, yaw]
     
     using Vx = Eigen::Vector<double, STATE_NUM>;
@@ -17,7 +17,7 @@ public:
     using Mxz = Eigen::Matrix<double, STATE_NUM, OBSERVE_NUM>;
 
     // 状态变量
-    Vx Xe;  // 当前状态估计 [x, vx, y, vy, yaw, vyaw]
+    Vx Xe;  // 当前状态估计 [x, vx, y, vy, yaw, vyaw, r1, r2]
     Vx Xp;  // 预测状态
     
     // CKF变量
@@ -27,25 +27,25 @@ public:
     Vz Zp;
     
     int sample_num_;
-    std::vector<Vx> samples_;
     std::vector<double> weights_;
+    std::vector<Vx> samples_;
     std::vector<Vx> sample_X;
     std::vector<Vz> sample_Z;
+    std::vector<double> initial_radius{0.25, 0.25};
+    //double radius;
     
     double last_timestamp_;
     bool is_initialized_;
 
     // 机器人特定参数
-    int armor_cnt_;
     double angle_dis_;
-    std::vector<double> const_radius_;
-    std::vector<double> const_z_;
 
     // 配置结构体
     struct CKFConfig {
         double Q2_X = 0.1;
         double Q2_Y = 0.1;
         double Q2_YAW = 0.01;
+        double Q_r = 0.01;
         double R_XYZ = 0.01;
         double R_YAW = 0.001;
         Mxx config_Pe;
@@ -58,16 +58,15 @@ public:
 
     // 重置滤波器
     void reset(const Eigen::Vector3d& position, double yaw, int _phase_id, 
-               int _armor_cnt, double _timestamp, 
-               std::vector<double> _radius, std::vector<double> _z);
+               double _timestamp);
     
     // 更新函数
     void update(const Eigen::Vector3d& position, double yaw, 
                 double _timestamp, int _phase_id);
     
     // 预测特定装甲板位置
-    Eigen::Vector3d predictArmorPosition(int phase_id, double predict_time);
-    
+    Eigen::Vector3d predictArmorPosition(double z, int phase_id, double dt, double timestamp);
+    Eigen::Vector3d predictCenterPosition(double z, double dt, double timestamp);
     // 初始化CKF
     void initializeCKF();
     

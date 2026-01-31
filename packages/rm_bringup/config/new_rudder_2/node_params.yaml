@@ -95,11 +95,19 @@
     yaw_ekf.R: [0.0029]
     
     # enemy_kf
-    enemy_ckf.P: [1.0,1.0,1.0,1.0,1.0,1.0]
-    enemy_ckf.R_XYZ: 0.0025
-    enemy_ckf.R_YAW: 0.0029
-    enemy_ckf.Q2_XY: 85.0
-    enemy_ckf.Q2_YAW: 85.0
+    enemy_ckf.Pe: [1.00,  0.02,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
+                   0.02,  1.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,
+                   0.00,  0.00,  1.00,  0.02,  0.00,  0.00,  0.00,  0.00,
+                   0.00,  0.00,  0.02,  1.00,  0.00,  0.00,  0.00,  0.00,
+                   0.00,  0.00,  0.00,  0.00,  1.00,  0.03,  0.00,  0.00,
+                   0.00,  0.00,  0.00,  0.00,  0.03,  1.00,  0.00,  0.00,
+                   0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  1.00,  0.00,
+                   0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  0.00,  1.00]
+    enemy_ckf.R_XYZ: 0.01
+    enemy_ckf.R_YAW: 0.2
+    enemy_ckf.Q2_XY: 84.0
+    enemy_ckf.Q2_YAW: 84.0
+    enemy_ckf.Q_r : 10.0
     standard_dis: 0.17
     balance_dis: 0.2
 
@@ -131,7 +139,7 @@
     # 运动状态判断
     rotate_thresh: 2.5                    #进入旋转状态阈值
     rotate_exit: 1.5                      #退出旋转状态阈值
-    high_spd_rotate_thresh: 23.5           #进入高速旋转状态阈值
+    high_spd_rotate_thresh: 0.5           #进入高速旋转状态阈值
     high_spd_rotate_exit: 22.5            #退出高速旋转状态阈值
     move_thresh: 1.0                      #进入移动状态阈值(目前移动小陀螺判断)
     move_exit: 0.5                        #退出移动状态阈值
@@ -144,8 +152,8 @@
     pitch_error_dis_thresh: 0.06          #自动发弹阈值，目标上下小陀螺时pitch限制
     choose_enemy_without_autoaim_signal: false  #在没有收到右键信号的时候也选择目标（调试用）
     # 延迟参数
-    response_delay: 0.08                  #系统延迟(程序+通信+云台响应)
-    shoot_delay: 0.28                     #发弹延迟
+    response_delay: 0.2                 #系统延迟(程序+通信+云台响应)
+    shoot_delay: 0.08                     #发弹延迟
 
     enemy_radius_cache_reset_time: 45.0
     
@@ -155,24 +163,20 @@
     # 弹道参数
     # # 分别五个值分别对应9，15，16，18，30弹速的弹道参数
     ballistic.stored_yaw_offset: [0.0, 0.0, 0.0, -0.2, -0.2]
-    ballistic.stored_pitch_offset: [0.0, 0.0, -0.4, -0.8, -0.8] # enemy
+    ballistic.stored_pitch_offset: [-0.5, -1.5, -2.0, -3.0, -3.5] # enemy
     # 在stored_pitch_offset的基础上，对低打高和高打低的额外补偿
     pitch_offset_high_hit_low: 0.0
     pitch_offset_low_hit_high: 0.0
 
-/outpostaim:
+/outpost_predictor:
   ros__parameters:
-    detection_topic: vision/tracked
-    robot_topic: rm_robot
-    control_topic: control
-    image_topic: hikcam/image_raw
-    camera_info_topic: hikcam/camera_info
-    enable_imshow: true
+    detection_name: detection_outpost
+    robot_name: rm_robot
+    enable_imshow: false
     debug: false
     camera_name: "hkcam"
     target_frame: "odom"
-    camera_frame: "camera_optical_frame"
-    # found_params: true
+    found_params: true
     # armor_ekf
     armor_ekf.P: [1.0,1.0,1.0,1.0,1.0,1.0]
     armor_ekf.Q: [0.00000025, 0.00000025, 0.000001, 0.01, 0.01, 0.01]
@@ -197,22 +201,31 @@
     balance_dis: 0.2
     const_dis: 0.2765
     
-    # 前哨站相关参数
-    census_period_max: 2.5
+    # 传统方法感知陀螺/前哨站相关参数
+    census_period_min: 1.3
+    census_period_max: 3.5
     anti_outpost_census_period: 10.0
+    anti_outpost_census_period_min: 0.1
     timestamp_thresh: 0.03                # 反前哨站时间差阈值
     top_pitch_thresh: 10.0         # 判定建筑顶端装甲板的pitch阈值
-
+    top_offset_z: 0.3345    # 顶装甲相对于前哨站中心的高度
+    top_offset_dis: 0.2865  # 顶装甲相对于前哨站装甲板中心的水平投影距离
     # 装甲目标过滤/选择
     sight_limit: 10.0                     #过滤距离过远装甲板
     high_limit: 2.4                       #过滤距离过高过低的装甲板
     size_limit: 200.0                     #按面积过滤装甲板（太小）
     bound_limit: 30.0                     #过滤图像边缘的装甲板（单位为像素）
-    aspect_limit_small: 0.8               #当小装甲板处于40度时宽高比      
+    aspect_limit_big: 1.6                 #当大装甲板处于40度时宽高比 公式m*sin(40)/n
+    aspect_limit_small: 0.8               #当小装甲板处于40度时宽高比
+    rm_pnp_aspect_limit_big: 3.83         #使用约束pnp的宽高比       
+    rm_pnp_aspect_limit_small: 2.37       #使用约束pnp的宽高比        
     reset_time: 0.52                      #若在视野中消失 reset_time秒，认为目标丢失
+    size_ratio_thresh: 1.8                #切换整车滤波跟踪装甲板的面积阈值/切换选择目标的面积阈值
     collimation: [320.0,320.0]            #二维图像上的准星
     # 帧间匹配
     interframe_dis_thresh: 0.04617        #两帧间装甲板的最大移动距离（用于帧间匹配）
+    id_inertia: 100                       #摩尔投标编号过滤惯性帧数
+    robot_2armor_dis_thresh: 1.0          #同一车上相邻两装甲板最远距离
     # 火控参数
     change_armor_time_thresh: 0.1
     midshot_period: 0.02
@@ -220,11 +233,6 @@
     # 延迟参数
     response_delay: 0.05                  #系统延迟(程序+通信+云台响应)
     shoot_delay: 0.08                     #发弹延迟
-    gimbal_adjust_delay: 0.3              # 云台调整延迟时间（秒）
-
-    # 前哨站装甲板高度观测系统参数
-    height_tolerance: 0.05  # 高度容差阈值（米）+-范围
-    hero_fixed_armor_id: 0
     
     # 弹道参数
     # # 分别五个值分别对应9，15，16，18，30弹速的弹道参数
