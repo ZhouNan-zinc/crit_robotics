@@ -55,7 +55,7 @@ public:
     // Eigen::Vector3d pyd; 
 };
 
-// OutpostYawEkf类（从outpost_armor_ekf.h迁移）
+// OutpostYawEkf类
 class OutpostYawEkf : public Ekf<2, 1>{
 public:
     OutpostYawEkf() : Ekf(){ H(0, 0) = 1; }
@@ -258,7 +258,7 @@ public:
     
 };
 
-// step_fitter类
+// step_fitter类 装甲板过中时间拟合
 class step_fitter {
 private:
     double sumx;
@@ -369,7 +369,7 @@ public:
         if (N < min_length) return -1;
         return fit(N + 1);
     }
-
+    // 获取上一次过中时间
     double get_last_middle_time(){
         return last_middle_time;
     }

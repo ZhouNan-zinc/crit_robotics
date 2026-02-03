@@ -9,11 +9,11 @@ from launch_ros.actions import Node
 sys.path.append(os.path.join(get_package_share_directory("rm_bringup"), "launch"))
 
 # 根据机器人修改
-robot_dir = "new_rudder"
+robot_dir = "new_rudder_2"
 use_can = False
 # rosbag config
-bag_dir = "/workspaces/crit_robotics/rosbag2_2026_01_17-23_38_02"
-rate = "1"
+bag_dir = "/home/ubuntu/outpostnew4"
+rate = "1.0"
 
 def generate_launch_description():
     from launch_ros.descriptions import ComposableNode
@@ -69,13 +69,13 @@ def generate_launch_description():
         "package://rm_bringup/config", robot_dir, "camera_info.yaml"
     )
 
-    def get_intra_container():
-        return ComposableNodeContainer(
-            name="intra_container",
-            namespace="",
-            package="rclcpp_components",
-            executable="component_container_isolated",
-            composable_node_descriptions=[
+    # def get_intra_container():
+    #     return ComposableNodeContainer(
+    #         name="intra_container",
+    #         namespace="",
+    #         package="rclcpp_components",
+    #         executable="component_container_isolated",
+    #         composable_node_descriptions=[
                 # ComposableNode(
                 #     package="rm_republish",
                 #     plugin="ngxy_republish::RepublishNode",
@@ -113,13 +113,13 @@ def generate_launch_description():
                 #    parameters=[node_params, {"detector_dir": detector_dir}],
                 #    extra_arguments=[{"use_intra_process_comms": True}],
                 #),
-                ComposableNode(
-                    package="enemy_predictor",
-                    plugin="EnemyPredictorNode",
-                    name="enemy_predictor",
-                    parameters=ros_parameters,
-                    extra_arguments=[{"use_intra_process_comms": True}],
-                ),
+                # ComposableNode(
+                #     package="outpostaim",
+                #     plugin="OutpostNode",
+                #     name="outpostaim",
+                #     parameters=ros_parameters,
+                #     extra_arguments=[{"use_intra_process_comms": True}],
+                # ),
                 # ComposableNode(
                 #     package="energy_predictor",
                 #     plugin="energy_predictor::EnergyPredictorNode",
@@ -134,15 +134,15 @@ def generate_launch_description():
                 #     parameters=ros_parameters,
                 #     extra_arguments=[{"use_intra_process_comms": True}],
                 # ),
-            ],
-            output="both",
-            emulate_tty=True,
+            # ],
+            # output="both",
+            # emulate_tty=True,
             #            ros_arguments=['--ros-args', '--log-level',
             #                           'armor_detector:='+launch_params['detector_log_level']],
-            on_exit=Shutdown(),
-        )
+            # on_exit=Shutdown(),
+        # )
 
-    intra_container = get_intra_container()
+    # intra_container = get_intra_container()
 
     rosbag = ExecuteProcess(
         cmd=[
@@ -188,7 +188,13 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            intra_container,
+            # intra_container,
+            Node(
+                package="outpostaim",
+                executable="outpostaim_node",
+                name="outpostaim",
+                parameters=ros_parameters,
+            ),
             robot_state_publisher,
             # foxglove,
             rosbag,

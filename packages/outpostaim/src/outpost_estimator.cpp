@@ -7,7 +7,7 @@ Eigen::Vector3d operator*(const Eigen::Isometry3d &T, const Eigen::Vector3d &v) 
     return (T * V).block<3, 1>(0, 0);
 }
 
-//——————————————————————————————————————Armor状态————————————————————————————————————————
+//----------------------------------------OutpostArmor类---------------------------------------
 
 void OutpostArmor::init(const ArmorPoseResult &pc_result, double _timestamp){
     pc_result_ = pc_result;
@@ -33,6 +33,8 @@ void OutpostArmor::update(ArmorPoseResult &pc_result, double _timestamp){
     // 更新点坐标
     pc_result_ = pc_result;
     Eigen::Matrix<double, 3, 1> new_pyd = pc_result_.pose.get_pyd_vec();
+    // 此处 pc_result_.pose.yaw 已修改为位置方位角(Position Yaw)，而非法向量yaw
+    // new_ori_yaw 变量名虽含 ori (orientation)，但现在实际存储的是 Position Yaw
     double new_ori_yaw = pc_result_.pose.yaw;
     // 进行yaw区间过零处理
     if (new_pyd[1] - last_yaw_ < -M_PI * 1.5)
@@ -72,9 +74,9 @@ void OutpostArmor::zeroCrossing(double datum){
     armor_kf_.getX()[1] = yaw;  // 利用协方差与均值无关的性质，对SCKF的点进行yaw轴上的平移
 }
 
-//------------------------Armor状态----------------------------
+//---------------------------------------OutpostArmor类---------------------------------------
 
-//-----------------------Outpost状态---------------------
+//---------------------------------------Outpost类---------------------------------------
 
 Outpost::Outpost(ArmorId _id, bool _outpost_kf_init, bool _in_follow, int _armor_cnt)
                 : id(_id), outpost_kf_init(_outpost_kf_init), in_follow(_in_follow), armor_cnt(_armor_cnt){
@@ -121,7 +123,7 @@ Outpost::OutpostPosition Outpost::predict_positions(double _timestamp){
     // 中心状态
     OutpostCkf::State state_pre = op_ckf.predictState(_timestamp);
     result.center_ = OutpostCkf::get_center(state_pre);
-    //若高度映射已建立，用装甲板的平均高度作为中心高度 实际并不会使用中心高度
+    //若高度映射已建立，用装甲板的平均高度作为中心高度。 中心高度貌似暂时用不上
     if(height_mapping_initialized_){
         double height[3];
         for(int i = 0; i < 3; ++i){
@@ -139,9 +141,14 @@ Outpost::OutpostPosition Outpost::predict_positions(double _timestamp){
         }
         OutpostCkf::Vx tmp_state_vec = state_pre.toVx();
         // yaw 表示 0 号装甲板相位角，其他装甲板按 +i*angle_dis_ 递增
+        // 计算预测的位置坐标 (Center -> Armor)
         OutpostCkf::Observe observe_pre(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(tmp_state_vec), i, armor_height));
         result.armors_xyz_[i] = Eigen::Vector3d(observe_pre.x, observe_pre.y, observe_pre.z);
-        result.armor_yaws_[i] = observe_pre.yaw + i * op_ckf.angle_dis_;
+        
+        // 外部选板逻辑需要装甲板的【法向量朝向】(Normal Yaw)，而非位置方位角(Position Yaw)
+        // state.yaw 是 0号装甲板的相位角
+        OutpostCkf::State temp_state; temp_state.fromVx(tmp_state_vec);
+        result.armor_yaws_[i] = temp_state.yaw + i * op_ckf.angle_dis_;
     }
     return result;
 }
@@ -161,9 +168,12 @@ void Outpost::reset(const OutpostCkf::Observe &_observe, int _phase_id, int _arm
         double armor_height = get_armor_height_by_id(i);
         OutpostCkf::Observe observe(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(op_ckf.Xe), i, armor_height));
         now_position_.armors_xyz_[i] = Eigen::Vector3d(observe.x, observe.y, observe.z);
-        now_position_.armor_yaws_[i] = observe.yaw + i * op_ckf.angle_dis_;
+        
+        // reset 时的状态显示，使用【法向量朝向】
+        OutpostCkf::State temp_state; temp_state.fromVx(Eigen::Ref<const OutpostCkf::Vx>(op_ckf.Xe));
+        now_position_.armor_yaws_[i] = temp_state.yaw + i * op_ckf.angle_dis_;
     }
-    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Outpost reset: phase=%d, armor_cnt=%d, Center=[%.3f, %.3f, %.3f], Yaw=%.3f", 
+    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Outpost reset: phase=%d, armor_cnt=%d, Center=[%.3f, %.3f, %.3f], Phase0=%.3f", 
         _phase_id, armor_cnt, now_position_.center_[0], now_position_.center_[1], now_position_.center_[2], op_ckf.state_.yaw);
 }
 
@@ -176,8 +186,9 @@ void Outpost::update(OutpostCkf::Observe _observe, double _timestamp, int _phase
     // 修改观测值的高度为实际装甲板高度
     _observe.z = get_armor_height_by_id(_phase_id);
     
-    // —————————————————————————————————由于CKF不稳定，这里强行修正中心及角速度————————————————————————————————————
-    if (!yaw_increase_history.empty() && !yaw_decrease_history.empty()) {
+    // --------由于CKF不稳定，这里强行修正中心及角速度--------- 若打前哨站时自身不动，可以考虑使用这个逻辑？
+    // 当前 非无人机使用此逻辑
+    if (!is_aerial && !yaw_increase_history.empty() && !yaw_decrease_history.empty()) {
          // --- 替换 CKF 逻辑 ---
         
         // 取左右边界的中线Yaw
@@ -245,7 +256,7 @@ void Outpost::update(OutpostCkf::Observe _observe, double _timestamp, int _phase
         // 其他情况使用原 CKF 进行更新
         op_ckf.CKF_update(_observe, _timestamp, _phase_id);
     }
-    // ————————————————————————————————————————————————————————————————————————————————————————————————————————————————————
+    // -------------------------------------------------
 
     now_position_.center_ = OutpostCkf::get_center(op_ckf.state_);
 
@@ -258,21 +269,20 @@ void Outpost::update(OutpostCkf::Observe _observe, double _timestamp, int _phase
     for (int i = 0; i < armor_cnt; ++i) {
         double armor_height = get_armor_height_by_id(i);
         OutpostCkf::Observe observe(op_ckf.h(Eigen::Ref<const OutpostCkf::Vx>(op_ckf.Xe), i, armor_height));
-        now_position_.armors_xyz_[i] = Eigen::Vector3d(observe.x, observe.y, observe.z);
-        now_position_.armor_yaws_[i] = observe.yaw + i * op_ckf.angle_dis_;
+        
+        // 状态更新后显示，使用【法向量朝向】
+        OutpostCkf::State temp_state; temp_state.fromVx(Eigen::Ref<const OutpostCkf::Vx>(op_ckf.Xe));
+        now_position_.armor_yaws_[i] = temp_state.yaw + i * op_ckf.angle_dis_;
 
         RCLCPP_INFO(rclcpp::get_logger("outpostaim"), 
-            "  -> Armor %d: Pos=[%.3f, %.3f, %.3f], Yaw=%.3f", 
+            " -> Armor %d: Pos=[%.3f, %.3f, %.3f], Yaw=%.3f", 
             i, now_position_.armors_xyz_[i][0], now_position_.armors_xyz_[i][1], now_position_.armors_xyz_[i][2], now_position_.armor_yaws_[i]);
     }
 }
 
-// void Outpost::set_unfollowed(){
-//     in_follow = false;
-// }
-//-----------------------Outpost状态---------------------
+//---------------------------------------Outpost类---------------------------------------
 
-//---------------------OutpostCkf-------------------------
+//---------------------------------------OutpostCkf---------------------------------------
 
 OutpostCkf::OutpostCkf(){
     sample_num_ = 2 * state_num;
@@ -288,6 +298,9 @@ void OutpostCkf::reset(const Observe &_observe, int phase_id, int _armor_cnt, do
     angle_dis_ = 2 * M_PI / armor_cnt_;
     //_z是观测到的装甲板高度，用它初始化滤波器
     const_z_ = _z;
+    // 使用观测到的位置方位角来粗略初始化状态
+    // 注意：_observe.yaw 是 Azimuth, state_.yaw 是 Normal。
+    // 两者存在几何偏差，仅作为初值。
     state_ = State(_observe.x - const_dis_ * cos(_observe.yaw + phase_id * angle_dis_), 0.,
                   _observe.y - const_dis_ * sin(_observe.yaw + phase_id * angle_dis_), 0., 
                   const_z_,
@@ -337,14 +350,17 @@ OutpostCkf::Vz OutpostCkf::h(const Eigen::Ref<const OutpostCkf::Vx> &_x, int _ph
     State X_state;
     X_state.fromVx(_x);
     Observe ans;
-    ans.yaw = X_state.yaw;  // id为0的装甲板的yaw
-
+    // 相位角转位置坐标
     ans.x = X_state.x + const_dis_ * cos(X_state.yaw + _phase_id * angle_dis_);
     ans.y = X_state.y + const_dis_ * sin(X_state.yaw + _phase_id * angle_dis_);
-    ans.z = armor_height;
-    Vz result = ans.toVz();
-    return result;
 
+    // 这里的 ans.yaw 对应观测向量 z 中的 yaw (即 atan2(y, x))
+    // 注意：不要输出法向量 yaw，否则会与输入的观测值含义冲突导致残差计算错误。
+    // 先算方位角，用于和测量值(也是方位角)做差
+    ans.yaw = atan2(ans.y, ans.x);
+    
+    ans.z = armor_height; 
+    return ans.toVz();
 }
 
 void OutpostCkf::SRCR_sampling_3(const Eigen::Ref<const OutpostCkf::Vx> &_x, const Mxx &_P){
@@ -410,7 +426,10 @@ void OutpostCkf::CKF_measure(Vz _z, int phase_id, double armor_height){
 
     Pzz = Mzz::Zero();
     for (int i = 0; i < sample_num_; ++i) {
-        Pzz += weights_[i] * (sample_Z[i] - Zp) * (sample_Z[i] - Zp).transpose();
+        Vz diff = sample_Z[i] - Zp;
+        while (diff[3] > M_PI) diff[3] -= 2 * M_PI;
+        while (diff[3] < -M_PI) diff[3] += 2 * M_PI;
+        Pzz += weights_[i] * diff * diff.transpose();
     }
 
     // 根据dis计算自适应R
@@ -421,14 +440,22 @@ void OutpostCkf::CKF_measure(Vz _z, int phase_id, double armor_height){
 void OutpostCkf::CKF_correct(Vz _z){
     Pxz = Mxz::Zero();
     for (int i = 0; i < sample_num_; ++i) {
-        Pxz += weights_[i] * (sample_X[i] - Xp) * (sample_Z[i] - Zp).transpose();
+        Vz diff_z = sample_Z[i] - Zp;
+        while (diff_z[3] > M_PI) diff_z[3] -= 2 * M_PI;
+        while (diff_z[3] < -M_PI) diff_z[3] += 2 * M_PI;
+
+        Pxz += weights_[i] * (sample_X[i] - Xp) * diff_z.transpose();
     }
     K = Pxz * Pzz.inverse();
 
-    Xe = Xp + K * (_z - Zp);
+    Vz residual = _z - Zp;
+    while (residual[3] > M_PI) residual[3] -= 2 * M_PI;
+    while (residual[3] < -M_PI) residual[3] += 2 * M_PI;
+
+    Xe = Xp + K * residual;
     Pe = Pp - K * Pzz * K.transpose();
 
     state_.fromVx(Eigen::Ref<const OutpostCkf::Vx>(Xe));
     state_.z = const_z_;
 }
-//--------------------------OutpostCkf------------------------------------------
+//---------------------------------------OutpostCkf---------------------------------------

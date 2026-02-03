@@ -13,7 +13,7 @@
 #include <geometry_msgs/msg/pose.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <image_transport/image_transport.hpp>
-#include <cv_bridge/cv_bridge.h>
+#include <cv_bridge/cv_bridge.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
 #include "outpostaim/outpost_estimator.h"
@@ -24,9 +24,7 @@
 #include <functional>
 
 typedef rm_msgs::msg::Control ControlMsg;
-typedef rm_msgs::msg::RmImu RmImuMsg;
 typedef rm_msgs::msg::RmRobot RmRobotMsg;
-typedef rm_msgs::msg::State StateMsg;
 typedef vision_msgs::msg::Detection2DArray DetectionMsg;  // 添加类型别名
 
 inline ControlMsg createControlMsg(float _pitch, float _yaw, uint8_t _flag, uint8_t _one_shot_num, uint8_t _rate
@@ -41,7 +39,6 @@ inline ControlMsg createControlMsg(float _pitch, float _yaw, uint8_t _flag, uint
     //now.cam_mode = _cam_mode;
     return now;
 }
-
 
 inline VisionMode string2vision_mode(const std::string& mode_str){
     if (mode_str == "NO_AIM")
@@ -68,7 +65,7 @@ inline VisionMode string2vision_mode(const std::string& mode_str){
         return Unknown;
 }
 
-// 简化装甲板信息结构，从新识别节点接收
+// 装甲板信息结构，从新识别节点接收
 struct TrackedArmor {
     int id;  // 跟踪ID
     int class_id;  // 装甲板类型
@@ -150,7 +147,6 @@ struct OutpostNodeParams {
     std::string camera_frame = "camera_optical_frame";
 
     bool enable_imshow;
-    bool debug;
     VisionMode mode;
     bool right_press;  // 按下右键
     CameraMode cam_mode;
@@ -168,7 +164,6 @@ struct OutpostNodeParams {
     double shoot_delay;     // 发弹延迟
     double gimbal_adjust_delay;  // 云台调整延迟时间 仅用于英雄选择目标
 
-    int hero_fixed_armor_id;
     bool enable_hero_dynamic_selection;  // 是否启用英雄动态选择
 
     //--------------Manager-----------------------------
@@ -256,11 +251,10 @@ public:
 
     // 高度映射状态
     bool is_hero = false;
+    bool is_aerial = false;
     bool height_mapping_initialized_ = false;  // 是否已收集到三块装甲板的高度数据
     double armor_heights_[3] = {1.416, 1.516, 1.616};  // 默认高度，会被实际观测覆盖
 
-    //double target_dis_before_init_ = INFINITY; // 初始化完成前暂时使用的目标距离（保证ROI正常） 已取消
-    
     // outpost状态
     Status status = Status::Absent;
     OutpostPosition now_position_;
@@ -272,9 +266,7 @@ public:
     MathFilter common_middle_dis, common_middle_pitch, common_yaw_spd = MathFilter(10);
     MathFilter const_z_filter = MathFilter(20, ArithmeticMean);
     MathFilter center_pos_filter[3];
-    // MathFilter top_pos_filter[3];
-    MathFilter armor_height_filter[3];  // 分别对三个装甲板高度进行滤波 英雄
-    // MathFilter aiming_z_filter = MathFilter(20); //对瞄准点的z滤波 步兵
+    MathFilter armor_height_filter[3];  // 分别对三个装甲板高度进行滤波
 
     OutpostCkf op_ckf;
 
@@ -295,11 +287,6 @@ public:
 
     // timestamp, yaw
     std::deque<std::pair<double, double>> yaw_increase_history, yaw_decrease_history;// yaw的增加历史 和 yaw的减少历史
-
-    // std::queue<double> dis_yaw_queue;
-    // std::multiset<double> dis_yaw_set;
-    // int max_yaw_num = 100;
-
     
 };
 
@@ -337,7 +324,6 @@ public:
     RmRobotMsg robot;
     // outpost 管理（存为对象以简化使用）
     Outpost outpost;
-    // int target_outpost_id;
     // 接收到的检测消息
     OutpostDetectMsg recv_detection;
 
@@ -372,7 +358,7 @@ private:
     OutpostNodeParams params_;
     OutpostManager manager_;
     Outpost outpost;  // 添加Outpost成员
-    RmImuMsg imu;
+    rm_msgs::msg::RmImu imu;
     std::shared_ptr<Ballistic> bac;
 
     ControlMsg off_cmd;

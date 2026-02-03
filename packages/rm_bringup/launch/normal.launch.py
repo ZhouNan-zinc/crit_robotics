@@ -54,18 +54,18 @@ def generate_launch_description():
                 {"robot_description": robot_description, "publish_frequency": 1000.0}
             ],
         ),
-        Node(
-            package="simple_serial_driver",
-            executable="simple_serial_driver_node",
-            name="simple_serial_driver",
-            parameters=ros_parameters,
-            on_exit=Shutdown(),
-            ros_arguments=[
-                "--ros-args",
-                "--log-level",
-                "serial_driver:=" + launch_params["serial_log_level"],
-            ],
-        ),
+        # Node(
+        #     package="simple_serial_driver",
+        #     executable="simple_serial_driver_node",
+        #     name="simple_serial_driver",
+        #     parameters=ros_parameters,
+        #     on_exit=Shutdown(),
+        #     ros_arguments=[
+        #         "--ros-args",
+        #         "--log-level",
+        #         "serial_driver:=" + launch_params["serial_log_level"],
+        #     ],
+        # ),
         Node(
             package="enemy_predictor",
             executable="enemy_predictor_node",

@@ -53,9 +53,8 @@ OutpostNode::OutpostNode(const rclcpp::NodeOptions& options)
         std::bind(&OutpostNode::robotCallback, this, std::placeholders::_1));
 
     // 创建控制指令发布器
-    control_pub = this->create_publisher<ControlMsg>("enemy_predictor", rclcpp::SensorDataQoS());
+    control_pub = this->create_publisher<ControlMsg>("control", rclcpp::SensorDataQoS());
     
-    // target_dis_pub = this->create_publisher<std_msgs::msg::Float64>("target_dis", 10);
     marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("outpost_vis", 10);
 
     CLK = rclcpp::Clock{RCL_STEADY_TIME};
@@ -76,7 +75,6 @@ void OutpostNode::loadAllParams() {
     params_.timestamp_thresh = this->declare_parameter("timestamp_thresh", 0.5);
     params_.midshot_period = declare_parameter("midshot_period", 0.02);
 
-    params_.hero_fixed_armor_id = this->declare_parameter("hero_fixed_armor_id", 0);
     params_.enable_hero_dynamic_selection = declare_parameter("enable_hero_dynamic_selection", true);
 
     // 火控参数
@@ -102,7 +100,7 @@ void OutpostNode::loadAllParams() {
     OutpostYawEkf::config_.vec_R = OutpostYawEkf::Vz(vec_R.data());
     OutpostYawEkf::config_.sigma2_Q = this->declare_parameter("yaw_ekf.Q", 0.01);
 
-    // enemy_ckf
+    // outpost_ckf
     OutpostCkf::config_.Q2_XY = this->declare_parameter("Q2_XY", 0.01);
     OutpostCkf::config_.Q2_YAW = this->declare_parameter("Q2_YAW", 0.01);
     OutpostCkf::config_.R_XYZ = this->declare_parameter("R_XYZ", 0.01);
@@ -114,12 +112,8 @@ void OutpostNode::loadAllParams() {
     
     // 管理参数
     params_.census_period_max = this->declare_parameter("census_period_max", 0.5);
-
-    params_.anti_outpost_census_period 
-                        = this->declare_parameter("anti_outpost_census_period", 0.5);
-
+    params_.anti_outpost_census_period = this->declare_parameter("anti_outpost_census_period", 0.5);
     params_.top_pitch_thresh = this->declare_parameter("top_pitch_thresh", 0.5);
-
     params_.sight_limit = this->declare_parameter("sight_limit", 0.5);
     params_.high_limit = this->declare_parameter("high_limit", 0.5);
     params_.size_limit = this->declare_parameter("size_limit", 0.5);
@@ -134,7 +128,6 @@ void OutpostNode::loadAllParams() {
     params_.interframe_dis_thresh = this->declare_parameter("interframe_dis_thresh", 0.5);
 
     params_.enable_imshow = this->declare_parameter("enable_imshow", false);
-    params_.debug = this->declare_parameter("debug", false);
 
     RCLCPP_INFO(this->get_logger(), "outpost_manager over");
 
@@ -335,23 +328,20 @@ void OutpostNode::detectionCallback(DetectionMsg::UniquePtr detection_msg){
     params_.rmcv_id = manager_.self_id;
     // 检查模式是否有效
     if (params_.mode != VisionMode::OUTPOST_AIM && params_.mode != VisionMode::AUTO_AIM) {
-        RCLCPP_INFO(get_logger(), "Not in OUTPOST_AIM or AUTO_AIM mode, skipping processing");
+        RCLCPP_INFO(get_logger(), "Not in OUTPOST_AIM, skipping processing");
         return;
     }
     // 从机器人消息获取弹速并更新弹道 是否重复了？
     bool is_big_bullet = false;
     if (manager_.robot.bullet_velocity > 8.0) {
         is_big_bullet = params_.rmcv_id.robot_id == RobotId::ROBOT_HERO;
-        // RCLCPP_INFO(get_logger(), "Bullet velocity updated: %.2f m/s", manager_.robot.bullet_velocity);
     } else {
         manager_.robot.bullet_velocity = is_big_bullet ? 12.0 : 22.0;
-        // RCLCPP_WARN(get_logger(), "Invalid bullet velocity: %.2f", manager_.robot.bullet_velocity);
     }
     bac->refresh_velocity(is_big_bullet, manager_.robot.bullet_velocity);
     // 从机器人消息获取相机切换状态
     if (manager_.robot.switch_cam) {
         RCLCPP_INFO(get_logger(), "Camera switch requested");
-        // 这里可以添加相机切换逻辑
     }
     // 从机器人消息获取自动射击率
     if (manager_.robot.autoshoot_rate > 0) {
@@ -492,7 +482,7 @@ void OutpostNode::robotCallback(RmRobotMsg::SharedPtr robot_msg){
     }
     imu = manager_.robot.imu;
 
-    // 更新弹速（如果机器人消息中有） 严查
+    // 更新弹速
     bool is_big_bullet = false;
     if (robot_msg->bullet_velocity > 8.) {
         is_big_bullet = params_.rmcv_id.robot_id == RobotId::ROBOT_HERO;

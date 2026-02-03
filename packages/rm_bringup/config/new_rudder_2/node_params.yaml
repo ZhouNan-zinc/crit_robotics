@@ -187,7 +187,6 @@
     armor_ekf.R: [0.00016, 0.00016, 0.0025]
     armor_ekf.Ke: [1.0, 1.0, 1.0]
     armor_ekf.filter_length: 10
-    armor_ekf.const_dis: 0.21
 
     # yaw_kf
     yaw_ekf.P: [1.0,1.0]
@@ -203,7 +202,7 @@
     Q2_YAW: 0.025
     standard_dis: 0.17
     balance_dis: 0.2
-    const_dis: 0.2765
+    const_dis: 0.275
     
     # 前哨站相关参数
     census_period_max: 2.5
@@ -228,15 +227,10 @@
     # 延迟参数
     response_delay: 0.05                  #系统延迟(程序+通信+云台响应)
     shoot_delay: 0.08                     #发弹延迟
-    gimbal_adjust_delay: 0.3              # 云台调整延迟时间（秒）
-
-    # 前哨站装甲板高度观测系统参数
-    height_tolerance: 0.05  # 高度容差阈值（米）+-范围
-    hero_fixed_armor_id: 0
+    gimbal_adjust_delay: 0.3              # 云台调整延迟时间（秒）仅用于英雄选择目标
     
     # 弹道参数
     # # 分别五个值分别对应9，15，16，18，30弹速的弹道参数
-    test_ballistic: false
     ballistic.stored_yaw_offset: [0.0, 0.0, 0.0, -0.4, -0.4]
     ballistic.stored_pitch_offset: [0.0, 0.0, 0.0, -1.6, -1.6] # outpost
 

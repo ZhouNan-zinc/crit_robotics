@@ -99,7 +99,7 @@ SerialDriverNode::SerialDriverNode(const rclcpp::NodeOptions& _options):Node("si
 
     // Control subscription
     control_sub = create_subscription<rm_msgs::msg::Control>(
-        "enemy_predictor", rclcpp::SensorDataQoS(),
+        "control", rclcpp::SensorDataQoS(),
         std::bind(&SerialDriverNode::ControlCallback, this, std::placeholders::_1));
     
     initPort();

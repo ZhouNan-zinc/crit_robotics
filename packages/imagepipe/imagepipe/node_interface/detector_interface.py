@@ -183,7 +183,7 @@ class YoloPoseDetector(DetectorNodeInterface):
         
         intermediate_model = ppp.build()
 
-        self.ov_model = ov.compile_model(intermediate_model, device_name="CPU")
+        self.ov_model = core.compile_model(intermediate_model, device_name="AUTO", config={"INFERENCE_PRECISION_HINT": "f32"})
 
         super().__init__()
 

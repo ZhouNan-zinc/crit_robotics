@@ -4,7 +4,7 @@
 #include <cmath>
 
 
-//--------------------------------UpdateArmor-----------------------------------------------
+//---------------------------------------UpdateArmor---------------------------------------
 
 void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armors, double timestamp) {
     static std::vector<OutpostArmor> new_armors;
@@ -34,6 +34,9 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
     if(self_id.robot_id == RobotId::ROBOT_HERO){
         outpost.is_hero = true;
     }
+    if(self_id.robot_id == RobotId::ROBOT_AERIAL){
+        outpost.is_aerial = true;
+    }
 
     // 存储当前帧的装甲板信息，用于下一帧
     std::map<int, TrackedArmor> current_frame_armors;
@@ -48,11 +51,9 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
         // 计算位置 yaw 和 pitch
         Eigen::Vector3d pyd_pos = xyz2pyd(tracked_armor.position_odom);
         pc_result.pose.pitch = pyd_pos[0];
+        pc_result.pose.yaw = pyd_pos[1];
         // 计算法向量
         pc_result.normal_vec = tracked_armor.orientation_odom * Eigen::Vector3d::UnitZ();
-        // Yaw 采用装甲板法向量的朝向
-        Eigen::Vector3d pyd_normal = xyz2pyd(pc_result.normal_vec);
-        pc_result.pose.yaw = pyd_normal[1];
         // 其他成员保持默认
         pc_result.reproject_error = 0.0;
 
@@ -118,7 +119,7 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
         double reassoc_dyaw_val = 1e9;
         
         // Reassoc Thresholds
-        constexpr double kReassocYawThresh = 0.08; // 阈值后期再调
+        constexpr double kReassocYawThresh = 0.08; // 现在对前哨站的识别不是很稳定，阈值后期再调
         const double kReassocMaxAge = std::min(0.30, params.reset_time);
 
         // 优先尝试 ID 匹配
@@ -166,7 +167,7 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
 
             int phase = armor.phase_in_outpost_;
 
-            // === 过中检测逻辑 ===
+            // 装甲板过中
             // 检查是否有上一帧信息
             if (last_frame_timestamp_ > 0 && !last_frame_armors_.empty()) {
                 // 查找上一帧相同ID的装甲板
@@ -333,11 +334,6 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
         if (!replaced) {
             outpost.armors.push_back(armor);
         }
-
-        // // 更新瞄准点z值滤波器
-        // outpost.aiming_z_filter.reset();
-        // outpost.aiming_z_filter.update(armor.getPositionXyz()[2]);
-
     }
     
     // 处理过时的装甲板（超过reset_time未更新）
@@ -364,9 +360,9 @@ void OutpostManager::updateArmors(const std::vector<TrackedArmor>& tracked_armor
     }
 }
 
-//-----------------------------------------UpdateArmor---------------------------------
+//---------------------------------------UpdateArmor---------------------------------------
 
-//-----------------------------------------UpdateOutpost--------------------------------
+//---------------------------------------UpdateOutpost---------------------------------------
 
 void OutpostManager::updateOutpost(){
     outpost.status = Status::Absent;
@@ -483,13 +479,13 @@ void OutpostManager::updateOutpost(){
     }
     
     // 可视化
-    if (params.enable_imshow && !params.debug && projector && !result_img_.empty()) {
+    if (params.enable_imshow && projector && !result_img_.empty()) {
         // 需要足够的历史数据
         if (!outpost.yaw_increase_history.empty() && !outpost.yaw_decrease_history.empty()) {
             double yaw_min = outpost.yaw_increase_history.front().second;
             double yaw_max = outpost.yaw_decrease_history.front().second;
 
-            // 左右边界 有点歪
+            // 左右边界
             cv::Point2d p1 = projector(pyd2xyz(Eigen::Vector3d{0.7, yaw_min, 10.}));
             cv::Point2d p2 = projector(pyd2xyz(Eigen::Vector3d{-0.7, yaw_min, 10.}));
             if (p1.x >= 0 && p2.x >= 0) cv::line(result_img_, p1, p2, cv::Scalar(0,0,255), 2);
@@ -557,7 +553,7 @@ void OutpostManager::updateOutpost(){
         }
     }
 
-    // 清理过时的历史记录  若简化模型需要考虑自身移动，则考虑缩小阈值？
+    // 清理过时的历史记录
     double current_time = recv_detection.time_stamp;
     while (!outpost.yaw_increase_history.empty() && 
            current_time - outpost.yaw_increase_history.front().first > params.census_period_max) {
@@ -572,9 +568,9 @@ void OutpostManager::updateOutpost(){
     for (; outpost.T_solver.N && recv_detection.time_stamp - outpost.T_solver.datas.front() > params.anti_outpost_census_period; outpost.T_solver.pop_front());
 }
 
-//----------------------------------UpdateOutpost-------------------------------
+//---------------------------------------UpdateOutpost---------------------------------------
 
-//----------------------------------SelectTarget--------------------------------
+//---------------------------------------SelectTarget---------------------------------------
 
 /**
  * @brief 英雄动态选择装甲板击打
@@ -821,17 +817,16 @@ OpNewSelectArmor OutpostNode::select_armor_directly(){
     return res;
 }
 
-//-----------------------------------SelectTarget--------------------------
+//---------------------------------------SelectTarget---------------------------------------
 
-//-----------------------------------GenerateCommand-----------------------
+//---------------------------------------GenerateCommand---------------------------------------
 
 /**
  * @brief 英雄专用弹道计算函数 针对前哨站特殊优化
  * @param predict_center 预测中心点（输出）
  * @param armor_z 目标装甲板的实际z坐标（高度）
  * @return 弹道计算结果
- * 
- * 功能说明：
+
  * 1. xy坐标使用前哨站中心（通过滤波器平滑）
  * 2. z坐标使用传入的装甲板实际高度
  * 3. 英雄不需要跟随装甲板yaw，只需瞄准中心，根据装甲板高度调整pitch
@@ -899,7 +894,7 @@ ControlMsg OutpostNode::get_command(){
         return off_cmd;
     }
 
-    // 获取前哨站中心距离（用于目标距离发布） 新识别貌似不需要接受距离了？
+    // 获取前哨站中心距离（用于目标距离发布） 新识别貌似不需要接收距离了？
     Eigen::Vector3d center_pos = outpost.predict_positions(manager_.recv_detection.time_stamp).center_;
     double outpost_target_dis = center_pos.norm();
     // pub_float_data(target_dis_pub, outpost_target_dis);
@@ -910,14 +905,8 @@ ControlMsg OutpostNode::get_command(){
     //     return off_cmd;
     // }
     outpost.in_follow = true;
-    
-    // if ((params_.rmcv_id.robot_id == RobotId::ROBOT_HERO) &&
-    //      !outpost.height_mapping_initialized_ && !params_.debug) {
-    //     RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "Height mapping not initialized yet for hero");
-    //     return off_cmd;
-    // }
 
-    //  英雄动态选择装甲板
+    //  英雄选择装甲板
     int follow_armor_id = -1;
     int dynamic_selected_id = -1;
     double selected_time_diff = INFINITY;
@@ -928,27 +917,44 @@ ControlMsg OutpostNode::get_command(){
     std::vector<bool> adjust_flags;
     std::vector<bool> fire_flags(3, false);  // 是否开火的判断
 
-    auto target = select_armor_directly();  // 整车建模策略下选择的装甲板
+    auto target = select_armor_directly();  // 整车建模策略下选择的装甲板 哨兵无人机
 
-    if ((params_.rmcv_id.robot_id == RobotId::ROBOT_HERO) && !params_.debug) {
-            // 英雄使用动态选择
+    if (params_.rmcv_id.robot_id == RobotId::ROBOT_HERO) {
+        if (params_.enable_hero_dynamic_selection) {
+            // 如果英雄启用动态选择
             dynamic_selected_id = select_armor_dynamically(selected_time_diff, selected_total_delay, 
-                                                          selected_system_delay, time_diffs, total_delays, adjust_flags);
+                                                        selected_system_delay, time_diffs, total_delays, adjust_flags);
             if (dynamic_selected_id >= 0) {
                 follow_armor_id = dynamic_selected_id;
                 RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Hero using dynamic selection, armor id: %d", follow_armor_id);
             } else {
-                // 动态选择失败，使用固定ID
-                follow_armor_id = params_.hero_fixed_armor_id;
+                // 动态选择失败，使用固定ID 0
+                follow_armor_id = 0;
                 RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Hero dynamic selection failed, using fixed armor id: %d", follow_armor_id);
             }
-        // 检查装甲板ID有效性
-        if (follow_armor_id < 0 || follow_armor_id >= outpost.armor_cnt) {
-            follow_armor_id = 0;
-            RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "Invalid armor id: %d, using 0", follow_armor_id);
+        } else {
+            // 不开启动态选择：固定选择最低的目标
+            double min_z = 9999.0;
+            int lowest_id = -1;
+            for(int i = 0; i < outpost.armor_cnt; ++i) {
+                double h = outpost.get_armor_height_by_id(i);
+                if (h < min_z) {
+                    min_z = h;
+                    lowest_id = i;
+                }
+            }
+            if (lowest_id >= 0) {
+                follow_armor_id = lowest_id;
+                RCLCPP_INFO_THROTTLE(rclcpp::get_logger("outpostaim"), *this->get_clock(), 500, 
+                    "Hero dynamic selection DISABLED, selecting lowest armor id: %d (height: %.3f)", follow_armor_id, min_z);
+            } else {
+                // 未找到有效装甲板，使用0
+                 follow_armor_id = 0; 
+                 RCLCPP_WARN(rclcpp::get_logger("outpostaim"), "Hero dynamic selection DISABLED, but failed to find lowest armor, using 0");
+            }
         }
     } else {
-        // 哨兵或英雄debug模式：使用动态选择的装甲板
+        // 哨兵无人机
         follow_armor_id = target.armors_index_in_outpost;
     }
 
@@ -970,19 +976,6 @@ ControlMsg OutpostNode::get_command(){
     // 获取装甲板实际高度 统一逻辑
     double armor_height = 0.0;
     armor_height = outpost.get_armor_height_by_id(follow_armor_id);
-
-    // if (params_.rmcv_id.robot_id == RobotId::ROBOT_HERO) {
-    //     // 英雄：使用高度映射中的实际高度
-    //     armor_height = outpost.get_armor_height_by_id(follow_armor_id);
-    // } else {
-    //     // 其他兵种当高度映射建立后使用映射值，否则直接使用观测值
-    //     if(outpost.height_mapping_initialized_){
-    //         armor_height = outpost.get_armor_height_by_id(follow_armor_id);
-    //     } else { // 还有必要吗，实际上高度映射建立前瞄准点基本无意义
-    //         outpost.aiming_z_filter.update(target.xyz[2]);
-    //         armor_height = outpost.aiming_z_filter.get();
-    //     }
-    // }
     
     // 解算瞄准点
     Ballistic::BallisticResult follow_ball = calc_ballistic(follow_armor_id, params_.response_delay + prev_latency, aiming_pos_xyz, armor_height);
@@ -1001,10 +994,8 @@ ControlMsg OutpostNode::get_command(){
     double gimbal_error_dis;
     bool should_fire = false;
 
-    // ControlMsg cmd;
-
-    // 主要由哨兵输出伤害
-    if ((params_.rmcv_id.robot_id != RobotId::ROBOT_HERO) || params_.debug) {
+    // 哨兵无人机
+    if (params_.rmcv_id.robot_id != RobotId::ROBOT_HERO) {
         // 过滤掉边界外的瞄准点
         if(follow_ball.yaw < yaw_min || follow_ball.yaw > yaw_max){
             RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "aiming out of boundary,aiming yaw %.3lf, yaw_min %.3lf, yaw_max %.3lf", follow_ball.yaw, yaw_min, yaw_max);
@@ -1015,20 +1006,16 @@ ControlMsg OutpostNode::get_command(){
                                 //6 // 先不设置
                                 /*send_cam_mode(params_.cam_mode)*/
             );
-        // 为何不用follow_ball的pitch？？
+
         // gimbal_error_dis = calc_surface_dis_xyz(pyd2xyz(Eigen::Vector3d{imu.pitch, follow_ball.yaw, target_dis}),
         //                                         pyd2xyz(Eigen::Vector3d{imu.pitch, imu.yaw, target_dis}));
         gimbal_error_dis = calc_surface_dis_xyz(pyd2xyz(Eigen::Vector3d{follow_ball.pitch, follow_ball.yaw, target_dis}),
                                                 pyd2xyz(Eigen::Vector3d{imu.pitch, imu.yaw, target_dis}));
 
-        // 高度映射建立前使用小阈值以保证准确，因为此时pitch调整到正确值需要一定时间
         bool can_fire = false;
         double yaw_thresh = outpost.op_ckf.const_dis_ * deg2rad(70.) / target_dis; // rad
         if(outpost.height_mapping_initialized_){
             can_fire = fabs(target.yaw_distance_predict) < deg2rad(30.) &&
-                                fabs(follow_ball.yaw - center_ball.yaw) < yaw_thresh && mono_exist;
-        } else {
-            can_fire = fabs(target.yaw_distance_predict) < deg2rad(20.) &&
                                 fabs(follow_ball.yaw - center_ball.yaw) < yaw_thresh && mono_exist;
         }
 
@@ -1049,52 +1036,48 @@ ControlMsg OutpostNode::get_command(){
     } else if (params_.rmcv_id.robot_id == RobotId::ROBOT_HERO) {
         // 英雄打前哨站（特化处理）
         double now = manager_.recv_detection.time_stamp;
-        if (params_.mode == OUTPOST_AIM || params_.mode == AUTO_AIM) {
-            // 英雄AIM模式：瞄准前哨站中心，但使用装甲板实际高度调整pitch
-            cmd = createControlMsg(
-            (float)center_ball.pitch,  // 使用装甲板高度的pitch
-            (float)center_ball.yaw,   // 使用中心的yaw（保持瞄准中心）
-            1, 0, 0
-            // 6 // 先不设置
-            /*send_cam_mode(params_.cam_mode*/
-            );
+        // 英雄AIM模式：瞄准前哨站中心，但使用装甲板实际高度调整pitch
+        cmd = createControlMsg(
+        (float)center_ball.pitch,  // 使用装甲板高度的pitch
+        (float)center_ball.yaw,   // 使用中心的yaw（保持瞄准中心）
+        1, 0, 0
+        // 6 // 先不设置
+        /*send_cam_mode(params_.cam_mode*/
+        );
+        // 开火判断
+        if (params_.enable_hero_dynamic_selection && dynamic_selected_id >= 0) {
 
-            // 重新计算开火判断（基于动态选择的时间差）
-            if (params_.enable_hero_dynamic_selection && dynamic_selected_id >= 0) {
-                // 使用动态选择计算的时间差进行开火判断
-                if (selected_time_diff < INFINITY) {
-
-                    double shot_arrive_delay = center_ball.t + params_.shoot_delay;
-                    // 时间差接近系统延迟（允许一定误差）
-                    double time_error = fabs(selected_time_diff - shot_arrive_delay);
-                    // 云台误差检查
-                    gimbal_error_dis = calc_surface_dis_xyz(
-                        pyd2xyz(Eigen::Vector3d{center_ball.pitch, center_ball.yaw, center_pos_pyd[2]}),
-                        pyd2xyz(Eigen::Vector3d{imu.pitch, imu.yaw, center_pos_pyd[2]})
-                    );
-                    // 判断是否开火
-                    bool time_condition = (time_error < params_.timestamp_thresh) && (selected_time_diff > 0);
-                    bool gimbal_condition = (gimbal_error_dis < params_.gimbal_error_dis_thresh);
-                    bool rate_condition = (now - last_shoot_t > params_.midshot_period);
-                    bool data_condition = (outpost.T_solver.N >= 3);  // RLS数据点足够
-                    
-                    should_fire = time_condition && gimbal_condition && rate_condition && data_condition;
-                    
-                    if (should_fire) {
-                        cmd.one_shot_num = 1;
-                        cmd.rate = 10;
-                        last_shoot_t = now;
-                        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Hero firing at armor %d (dynamic): time_diff=%.3f, system_delay=%.3f, error=%.3f", 
-                                    follow_armor_id, selected_time_diff, shot_arrive_delay, time_error);
-                    } else {
-                        // 记录不开火的原因
-                        RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Not firing: time_condition=%d, gimbal_condition=%d, rate_condition=%d, data_condition=%d (N=%d)",
-                                    time_condition, gimbal_condition, rate_condition, data_condition, outpost.T_solver.N);
-                }
-                    // 设置开火标志
-                    if (follow_armor_id >= 0 && follow_armor_id < 3) {
-                        fire_flags[follow_armor_id] = should_fire;
-                    }
+            if (selected_time_diff < INFINITY) {
+                double shot_arrive_delay = center_ball.t + params_.shoot_delay;
+                // 时间差接近延迟
+                double time_error = fabs(selected_time_diff - shot_arrive_delay);
+                // 云台误差检查
+                gimbal_error_dis = calc_surface_dis_xyz(
+                    pyd2xyz(Eigen::Vector3d{center_ball.pitch, center_ball.yaw, center_pos_pyd[2]}),
+                    pyd2xyz(Eigen::Vector3d{imu.pitch, imu.yaw, center_pos_pyd[2]})
+                );
+                // 判断是否开火
+                bool time_condition = (time_error < params_.timestamp_thresh) && (selected_time_diff > 0);
+                bool gimbal_condition = (gimbal_error_dis < params_.gimbal_error_dis_thresh);
+                bool rate_condition = (now - last_shoot_t > params_.midshot_period);
+                bool data_condition = (outpost.T_solver.N >= 3);  // RLS数据点足够
+                
+                should_fire = time_condition && gimbal_condition && rate_condition && data_condition;
+                
+                if (should_fire) {
+                    cmd.one_shot_num = 1;
+                    cmd.rate = 10;
+                    last_shoot_t = now;
+                    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Hero firing at armor %d (dynamic): time_diff=%.3f, system_delay=%.3f, error=%.3f", 
+                                follow_armor_id, selected_time_diff, shot_arrive_delay, time_error);
+                } else {
+                    // 记录不开火的原因
+                    RCLCPP_INFO(rclcpp::get_logger("outpostaim"), "Not firing: time_condition=%d, gimbal_condition=%d, rate_condition=%d, data_condition=%d (N=%d)",
+                                time_condition, gimbal_condition, rate_condition, data_condition, outpost.T_solver.N);
+            }
+                // 设置开火标志
+                if (follow_armor_id >= 0 && follow_armor_id < 3) {
+                    fire_flags[follow_armor_id] = should_fire;
                 }
             }
         }
@@ -1111,7 +1094,7 @@ ControlMsg OutpostNode::get_command(){
     }
 
     //可视化
-    if (params_.enable_imshow && !params_.debug) {
+    if (params_.enable_imshow) {
         cv::Mat &img = manager_.result_img_;
         if (!img.empty()) {
             if (params_.rmcv_id.robot_id != RobotId::ROBOT_HERO) {
@@ -1191,4 +1174,4 @@ ControlMsg OutpostNode::get_command(){
     return cmd;
 }
 
-//---------------------------------GenerateCommand---------------------------
+//---------------------------------------GenerateCommand---------------------------------------
